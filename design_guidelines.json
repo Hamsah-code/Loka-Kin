@@ -1,0 +1,65 @@
+{
+  "app_name": "LOKA-Kin",
+  "app_type": "dashboard",
+  "description": "Daily staff performance reporting & Kanban workflow (Plan, Doing, Finish) for 85 staff members with Google Sheets export simulation, charts, analytics, and personal performance summaries.",
+  "typography": {
+    "headings": "Plus Jakarta Sans",
+    "body": "Inter",
+    "weights": ["400", "500", "600", "700"]
+  },
+  "colors": {
+    "primary": "#2563EB",
+    "primary_hover": "#1D4ED8",
+    "accent": "#0EA5E9",
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "text": "#0F172A",
+    "text_muted": "#64748B",
+    "border": "#E2E8F0",
+    "kanban_plan": "#3B82F6",
+    "kanban_doing": "#F59E0B",
+    "kanban_finish": "#10B981"
+  },
+  "grids": {
+    "base": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+    "gap": "gap-6"
+  },
+  "layouts": [
+    "Sidebar Navigation + Topbar Header",
+    "Kanban Board View (Plan, Doing, Finish) with drag-drop / status switcher",
+    "Staff Directory (85 members) with individual profile performance drill-down",
+    "Analytics & Charts View (Daily completion rate, category distribution, productivity score)",
+    "Admin Management & Google Sheets Sync modal/tab"
+  ],
+  "motion": {
+    "transition": "transition-all duration-200 ease-in-out",
+    "hover": "hover:scale-[1.01] hover:shadow-md",
+    "entrance": "animate-fade-in"
+  },
+  "accessibility": {
+    "contrast": "WCAG AA compliant (minimum 4.5:1 text contrast)",
+    "focus_states": "ring-2 ring-blue-500 ring-offset-2",
+    "data_testid": "mandatory on all buttons, links, inputs, and key indicators"
+  },
+  "image_urls": [
+    {
+      "category": "team_banner",
+      "url": "https://images.unsplash.com/photo-1758691736975-9f7f643d178e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxjb3Jwb3JhdGUlMjB0ZWFtJTIwb2ZmaWNlJTIwcHJvZmVzc2lvbmFsJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg5MTMxMTAwfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Diverse group of professionals standing together indoors"
+    },
+    {
+      "category": "workspace",
+      "url": "https://images.unsplash.com/photo-1497215842964-222b430dc094?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBvZmZpY2UlMjB3b3Jrc3BhY2UlMjBkZXNrfGVufDB8fHx8MTc4OTEzMTEwM3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Modern office workspace desk"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Build a robust React application in /app/frontend with Tailwind CSS and Lucide icons.",
+    "No login required (Direct Dashboard Demo mode with active role switcher: Staff vs Admin).",
+    "Include simulated database of 85 staff members with avatars, departments, and daily metrics.",
+    "Implement Kanban Workflow with Plan (Blue), Doing (Amber), and Finish (Emerald) columns and task creation/editing modal (target, priority, due date, notes, proof link).",
+    "Add Analytics & Charts using Recharts showing workflow percentages, daily completion trends, and departmental breakdown.",
+    "Add Google Sheets Sync simulation button with status indicator and export options.",
+    "Ensure all interactive elements have data-testid attributes for testing."
+  ]
+}
