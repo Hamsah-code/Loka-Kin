@@ -16,7 +16,7 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
-DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial"]
+DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum"]
 
 # Pemetaan bagian pada DAFTAR HADIR STAF ke departemen resmi aplikasi
 DEPT_MAP = {
@@ -25,7 +25,7 @@ DEPT_MAP = {
     "Clinical Supervisor": "Layanan Rehabilitasi Medis",
     "Bendahara": "Bendahara",
     "Perencanaan": "Perencanaan",
-    "Umum": "Informasi dan Humas",
+    "Umum": "Umum",
     "Administrasi & SDM": "Admin",
     "Sarana Prasarana": "Admin",
     "Pengadaan Barang & Jasa": "Admin",
@@ -171,49 +171,26 @@ class Task(TaskCreate):
 
 
 async def seed_data():
-    count = await db.staff.count_documents({})
-    if count == 0:
-        docs = []
-        for i, (name, doc_dept) in enumerate(SEED_STAFF, start=1):
-            docs.append({
+    # Idempotent upsert staff-1..staff-78 dari SEED_STAFF (sumber DAFTAR HADIR STAF.docx)
+    for i, (name, doc_dept) in enumerate(SEED_STAFF, start=1):
+        await db.staff.update_one(
+            {"id": f"staff-{i}"},
+            {"$set": {
                 "id": f"staff-{i}",
                 "name": name,
                 "department": resolve_department(doc_dept),
                 "initials": make_initials(name),
                 "active": True,
-            })
-        await db.staff.insert_many(docs)
-    else:
-        existing = await db.staff.find({}, {"_id": 0}).to_list(500)
-        existing.sort(key=staff_sort_key)
-        # Sinkronkan slot pertama sepanjang jumlah data resmi
-        for i, (name, doc_dept) in enumerate(SEED_STAFF):
-            if i >= len(existing):
-                new_id = f"staff-{i+1}"
-                # Pastikan id belum dipakai
-                if not await db.staff.find_one({"id": new_id}):
-                    await db.staff.insert_one({
-                        "id": new_id,
-                        "name": name,
-                        "department": resolve_department(doc_dept),
-                        "initials": make_initials(name),
-                        "active": True,
-                    })
-                continue
-            person = existing[i]
-            await db.staff.update_one(
-                {"id": person["id"]},
-                {"$set": {
-                    "name": name,
-                    "department": resolve_department(doc_dept),
-                    "initials": make_initials(name),
-                }},
-            )
-        # Hapus staf sisa (di luar daftar resmi) yang belum memiliki tugas
-        for extra in existing[len(SEED_STAFF):]:
-            task_count = await db.tasks.count_documents({"staff_id": extra["id"]})
-            if task_count == 0:
-                await db.staff.delete_one({"id": extra["id"]})
+            }},
+            upsert=True,
+        )
+    # Bersihkan staf lama staff-N (N > 78) yang tidak memiliki tugas
+    stale_cursor = db.staff.find({"id": {"$regex": r"^staff-\d+$"}}, {"_id": 0, "id": 1})
+    async for row in stale_cursor:
+        tail = row["id"].split("-", 1)[1]
+        if tail.isdigit() and int(tail) > 78:
+            if await db.tasks.count_documents({"staff_id": row["id"]}) == 0:
+                await db.staff.delete_one({"id": row["id"]})
 
     if await db.tasks.count_documents({}) == 0:
         staff = await db.staff.find({}, {"_id": 0}).to_list(4)
