@@ -1,32 +1,38 @@
 # PRD — LOKA-Kin
 
 ## Pernyataan Masalah
-LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur Plan, Doing, dan Finish. Sistem menampilkan grafik serta persentase kinerja dan menyediakan ekspor laporan ke Google Sheets.
+LOKA-Kin adalah website laporan kinerja harian untuk staf Loka Rehabilitasi Narkotika Kalianda dengan alur Plan, Doing, dan Finish. Sistem menampilkan grafik, persentase kinerja, ekspor Excel/PDF berperiode, dan simulasi ekspor Google Sheets pada pukul 21.00 WIB.
 
 ## Keputusan Arsitektur
 - React + Tailwind-compatible CSS untuk dashboard responsif, dengan Lucide dan Sonner untuk interaksi.
 - FastAPI + MongoDB untuk data staf, laporan, analitik, dan endpoint ekspor.
-- Dashboard demo tanpa login; data awal otomatis menyiapkan 85 staf dan beberapa laporan contoh.
-- Google Sheets disiapkan sebagai alur ekspor berikutnya; saat ini endpoint memberikan status siap ekspor.
+- Dashboard demo tanpa login; data awal 78 staf resmi dari `DAFTAR HADIR STAF.docx`.
+- Ekspor Google Sheets otomatis pukul 21.00 WIB masih SIMULASI (belum ada OAuth).
 
 ## Persona
 - Staf: mengisi dan memperbarui laporan pekerjaan harian.
-- Admin Loka: memantau semua staf, melihat analitik, mengelola staf, dan menyiapkan ekspor.
+- Admin: memantau semua staf, melihat analitik, mengelola staf, dan menyiapkan ekspor.
 
 ## Persyaratan Inti (Statis)
 - Menu Plan, Doing, Finish.
-- 85 staf dapat dipilih dan dipantau.
-- Laporan memiliki judul, penanggung jawab, status, target, prioritas, tenggat, catatan, serta bukti/link.
-- Ringkasan, persentase workflow, completion rate, daftar staf, dan analitik.
-- Ekspor Google Sheets.
+- Data staf resmi dari DAFTAR HADIR STAF dengan enam departemen kantor.
+- Laporan memiliki judul, penanggung jawab, status, target, prioritas, tenggat, catatan, bukti/link, dan foto kegiatan.
+- Ringkasan, persentase workflow, completion rate, direktori staf, analitik departemen, dan ekspor Excel/PDF.
 
 ## Implementasi
 ### 2026-02-20
-- Membuat API FastAPI untuk staf, laporan CRUD, analitik, dan ekspor.
-- Menambahkan seed data 85 staf serta laporan demo.
-- Membuat dashboard LOKA-Kin dengan sidebar, ringkasan, Kanban, modal laporan, filter, pencarian, direktori staf, dan analitik.
-- Menambahkan form admin untuk membuat staf dan navigasi mobile.
-- Validasi build frontend dan smoke test API berhasil.
+- API FastAPI (CRUD staf/tugas, analitik) dan seed 85 staf, template dashboard React.
+
+### 2026-02-21
+- Sinkronisasi 78 nama staf resmi dari `DAFTAR HADIR STAF.docx` (staff-1 = Edwin, S.Sos … staff-78 = Umam Wijaya). Mapping bagian → 6 departemen aplikasi. Tasks lama tetap terhubung karena staff_id `staff-1..staff-78` dipertahankan.
+- Halaman Analitik:
+  - Subtitle diganti menjadi "Data Analitik Kinerja Tim harian, mingguan dan bulanan."
+  - Visual Completion Rate dirapikan: ring 150 px dengan angka persentase di pusat, legenda status berdampingan.
+- Ekspor Excel/PDF berperiode:
+  - Dialog ExportDialog memilih Harian, Mingguan, atau Bulanan dengan tanggal acuan.
+  - Data laporan difilter berdasarkan `created_at` sesuai rentang periode; header dokumen mencantumkan judul periode dan rentang tanggal.
+- Kontras dark mode disatukan lewat CSS variables (`--ink`, `--muted`, `--surface`, `--input-*`); teks tabel, form, badge, chart labels, empty state, task-menu, dan tombol ekspor kini kontras di dark mode.
+- Testing agent iterasi 2 (backend-only) lulus 9/9 pytest (validasi 78 nama staf, CRUD, analytics shape, export status simulasi).
 
 ## Backlog Terprioritas
 ### P0
@@ -35,38 +41,23 @@ LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur 
 ### P1
 - Login Google Workspace dan pembagian peran staf/admin.
 - Drag-and-drop antar kolom Kanban.
-- Riwayat perubahan dan laporan per tanggal.
+- Riwayat perubahan laporan.
 
 ### P2
 - Notifikasi tenggat dan ringkasan mingguan otomatis.
 - Impor daftar staf dari spreadsheet.
-- Ekspor PDF laporan individu.
 
 ## Tugas Berikutnya
-1. Pilih kredensial Google Workspace dan bentuk spreadsheet tujuan.
-2. Tambahkan filter tanggal untuk dashboard dan analitik.
-3. Aktifkan sinkronisasi Google Sheets sungguhan.
+1. Aktifkan sinkronisasi Google Sheets sungguhan (perlu OAuth Client ID/Secret dari user).
+2. Tambahkan filter tanggal spesifik pada Kanban/laporan harian.
+3. Pindahkan foto kegiatan ke object storage bila volume meningkat.
 
 ## Perubahan Lanjutan
-- Menghapus label workspace statis dan menggantinya dengan hari/tanggal realtime berbahasa Indonesia.
-- Mengganti departemen menjadi Admin, Bendahara, Perencanaan, Informasi dan Humas, Layanan Rehabilitasi Medis, dan Layanan Rehabilitasi Sosial.
-- Menambahkan grafik harian, mingguan, bulanan, serta ringkasan aktivitas per departemen.
-- Menambahkan scheduler ekspor otomatis pukul 21.00 Asia/Jakarta; karena mode simulasi dipilih, aktivitas dicatat sebagai simulasi dan belum mengunggah ke Google Sheets.
+- Menghapus label workspace statis dan menggantinya dengan hari/tanggal realtime.
+- Menambahkan grafik tren harian, mingguan, bulanan, serta ringkasan per departemen.
+- Scheduler ekspor otomatis pukul 21:00 WIB berjalan sebagai SIMULASI.
 
-## Pembaruan Tampilan dan Administrasi
-- Menambahkan pengalih tampilan Dashboard Dark/Light dengan preferensi tersimpan di browser.
-- Menghapus identitas Admin Loka dari header dan mengganti sapaan menjadi “Tabik Pun Staf Loka Rehabilitasi Narkotika Kalianda”.
-- Mengganti aksi ekspor tampilan menjadi unduh Excel dan dialog cetak untuk PDF.
-- Menambahkan tombol Hapus Staf pada setiap baris daftar staf dan endpoint penghapusan staf.
-
-## Lampiran Kegiatan dan Dokumen
-- Menambahkan upload foto kegiatan pada form Tambah tugas baru, dengan pratinjau, validasi gambar, dan batas ukuran 5 MB.
-- Menyimpan foto kegiatan sebagai data laporan agar ikut tersedia saat laporan dibuka kembali.
-- Menambahkan kolom foto pada ekspor Excel dan blok tanda tangan pada bagian bawah ekspor Excel maupun PDF.
-- Format tanda tangan mengikuti contoh: Mengetahui/Kepala Loka dan Kalianda, tanggal realtime/Penanggung Jawab Admin & SDM, dengan nama pejabat contoh.
-
-## Penyempurnaan Layout Ekspor
-- Menata ulang Excel dan PDF menggunakan tabel dengan kolom tetap, padding seragam, word-wrap, dan header yang konsisten.
-- Menggunakan tabel tanda tangan empat baris dengan dua kolom berukuran sama agar sisi kiri dan kanan selalu sejajar.
-- Menambahkan ruang tanda tangan dengan tinggi tetap sehingga nama pejabat berada pada garis horizontal yang sama.
-- PDF menggunakan format A4 landscape agar tabel laporan lebih lega dan tidak bertumpuk.
+## Pembaruan Tampilan
+- Dark/Light dengan preferensi tersimpan di browser.
+- Ekspor Excel dan PDF berbentuk dokumen berlayout A4 landscape (PDF), dengan header periode dan blok tanda tangan sejajar.
+- Upload foto kegiatan pada tugas (batas 5 MB, preview).
