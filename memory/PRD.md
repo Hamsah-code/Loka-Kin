@@ -52,3 +52,9 @@ LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur 
 - Mengganti departemen menjadi Admin, Bendahara, Perencanaan, Informasi dan Humas, Layanan Rehabilitasi Medis, dan Layanan Rehabilitasi Sosial.
 - Menambahkan grafik harian, mingguan, bulanan, serta ringkasan aktivitas per departemen.
 - Menambahkan scheduler ekspor otomatis pukul 21.00 Asia/Jakarta; karena mode simulasi dipilih, aktivitas dicatat sebagai simulasi dan belum mengunggah ke Google Sheets.
+
+## Pembaruan Tampilan dan Administrasi
+- Menambahkan pengalih tampilan Dashboard Dark/Light dengan preferensi tersimpan di browser.
+- Menghapus identitas Admin Loka dari header dan mengganti sapaan menjadi “Tabik Pun Staf Loka Rehabilitasi Narkotika Kalianda”.
+- Mengganti aksi ekspor tampilan menjadi unduh Excel dan dialog cetak untuk PDF.
+- Menambahkan tombol Hapus Staf pada setiap baris daftar staf dan endpoint penghapusan staf.

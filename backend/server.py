@@ -85,6 +85,12 @@ async def create_staff(payload: StaffCreate):
     await db.staff.insert_one(doc)
     return doc
 
+@api.delete("/staff/{staff_id}")
+async def delete_staff(staff_id: str):
+    result = await db.staff.delete_one({"id": staff_id})
+    if not result.deleted_count: raise HTTPException(404, "Staf tidak ditemukan")
+    return {"ok": True}
+
 @api.get("/tasks", response_model=List[Task])
 async def get_tasks():
     await seed_data()
