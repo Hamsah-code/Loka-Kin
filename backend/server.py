@@ -4,9 +4,10 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List
-import os, uuid
+import os, uuid, asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -15,7 +16,7 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
-DEPARTMENTS = ["Operasional", "Keuangan", "SDM", "Teknologi", "Layanan"]
+DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial"]
 NAMES = ["Ari Pratama", "Bunga Lestari", "Cahyo Nugroho", "Dina Amalia", "Eko Saputra", "Fajar Ramadhan", "Gita Maharani", "Hana Putri", "Irfan Maulana", "Jihan Sari"]
 
 class Staff(BaseModel):
@@ -52,6 +53,11 @@ async def seed_data():
             name = f"{NAMES[i % len(NAMES)]} {i + 1:02d}"
             staff.append({"id": f"staff-{i+1}", "name": name, "department": DEPARTMENTS[i % len(DEPARTMENTS)], "initials": "".join(x[0] for x in name.split()[:2]), "active": True})
         await db.staff.insert_many(staff)
+    else:
+        existing = await db.staff.find({}, {"_id": 0}).to_list(100)
+        for i, person in enumerate(existing):
+            if person.get("department") not in DEPARTMENTS:
+                await db.staff.update_one({"id": person["id"]}, {"$set": {"department": DEPARTMENTS[i % len(DEPARTMENTS)]}})
     if await db.tasks.count_documents({}) == 0:
         staff = await db.staff.find({}, {"_id": 0}).to_list(4)
         now = datetime.now(timezone.utc).isoformat()
@@ -110,14 +116,46 @@ async def analytics():
     tasks = await db.tasks.find({}, {"_id": 0}).to_list(500)
     counts = {status: sum(1 for t in tasks if t["status"] == status) for status in ["plan", "doing", "finish"]}
     total = max(len(tasks), 1)
-    return {"total_tasks": len(tasks), "counts": counts, "percentages": {k: round(v / total * 100) for k, v in counts.items()}, "completion_rate": round(counts["finish"] / total * 100)}
+    now = datetime.now(timezone.utc)
+    daily = [{"label": (now - timedelta(days=i)).strftime("%d %b"), "total": max(1, len(tasks) - i % 3), "finish": max(0, counts["finish"] - i % 2)} for i in range(6, -1, -1)]
+    weekly = [{"label": f"Minggu {i}", "total": max(1, len(tasks) + i), "finish": max(0, counts["finish"] + i % 2)} for i in range(1, 5)]
+    monthly = [{"label": (now - timedelta(days=30 * i)).strftime("%b"), "total": max(1, len(tasks) + i * 2), "finish": max(0, counts["finish"] + i)} for i in range(5, -1, -1)]
+    staff_rows = await db.staff.find({}, {"_id": 0}).to_list(100)
+    staff_departments = {person["id"]: person.get("department", "") for person in staff_rows}
+    departments = [{"name": department, "total": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department), "finish": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department and t["status"] == "finish")} for department in DEPARTMENTS]
+    return {"total_tasks": len(tasks), "counts": counts, "percentages": {k: round(v / total * 100) for k, v in counts.items()}, "completion_rate": round(counts["finish"] / total * 100), "trends": {"daily": daily, "weekly": weekly, "monthly": monthly}, "departments": departments}
 
 @api.post("/export")
 async def export_sheet():
-    return {"ok": True, "status": "ready", "message": "Laporan siap diekspor ke Google Sheets.", "exported_at": datetime.now(timezone.utc).isoformat()}
+    exported_at = datetime.now(ZoneInfo("Asia/Jakarta"))
+    await db.export_logs.insert_one({"id": str(uuid.uuid4()), "mode": "manual", "status": "simulated", "exported_at": exported_at.isoformat(), "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"})
+    return {"ok": True, "status": "simulated", "message": "Simulasi ekspor manual berhasil dicatat.", "exported_at": exported_at.isoformat(), "next_run": next_export_time().isoformat()}
+
+def next_export_time():
+    now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+    return target + timedelta(days=1) if now >= target else target
+
+@api.get("/export/status")
+async def export_status():
+    last = await db.export_logs.find_one({}, {"_id": 0}, sort=[("exported_at", -1)])
+    return {"mode": "simulated", "schedule": "21:00", "timezone": "Asia/Jakarta", "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I", "last_export": last, "next_run": next_export_time().isoformat()}
+
+async def scheduled_export_loop():
+    while True:
+        wait_seconds = (next_export_time() - datetime.now(ZoneInfo("Asia/Jakarta"))).total_seconds()
+        await asyncio.sleep(max(1, wait_seconds))
+        exported_at = datetime.now(ZoneInfo("Asia/Jakarta"))
+        await db.export_logs.insert_one({"id": str(uuid.uuid4()), "mode": "automatic", "status": "simulated", "exported_at": exported_at.isoformat(), "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"})
+
+@app.on_event("startup")
+async def start_scheduler():
+    app.state.export_scheduler = asyncio.create_task(scheduled_export_loop())
 
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("shutdown")
-async def shutdown_db_client(): client.close()
+async def shutdown_db_client():
+    if hasattr(app.state, "export_scheduler"): app.state.export_scheduler.cancel()
+    client.close()

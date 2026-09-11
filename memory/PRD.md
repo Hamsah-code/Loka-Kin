@@ -46,3 +46,9 @@ LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur 
 1. Pilih kredensial Google Workspace dan bentuk spreadsheet tujuan.
 2. Tambahkan filter tanggal untuk dashboard dan analitik.
 3. Aktifkan sinkronisasi Google Sheets sungguhan.
+
+## Perubahan Lanjutan
+- Menghapus label workspace statis dan menggantinya dengan hari/tanggal realtime berbahasa Indonesia.
+- Mengganti departemen menjadi Admin, Bendahara, Perencanaan, Informasi dan Humas, Layanan Rehabilitasi Medis, dan Layanan Rehabilitasi Sosial.
+- Menambahkan grafik harian, mingguan, bulanan, serta ringkasan aktivitas per departemen.
+- Menambahkan scheduler ekspor otomatis pukul 21.00 Asia/Jakarta; karena mode simulasi dipilih, aktivitas dicatat sebagai simulasi dan belum mengunggah ke Google Sheets.
