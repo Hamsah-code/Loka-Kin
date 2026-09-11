@@ -40,6 +40,8 @@ class TaskCreate(BaseModel):
     due_date: str = ""
     notes: str = ""
     proof_link: str = ""
+    photo_data: str = ""
+    photo_name: str = ""
 
 class Task(TaskCreate):
     model_config = ConfigDict(extra="ignore")

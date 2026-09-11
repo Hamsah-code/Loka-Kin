@@ -58,3 +58,9 @@ LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur 
 - Menghapus identitas Admin Loka dari header dan mengganti sapaan menjadi “Tabik Pun Staf Loka Rehabilitasi Narkotika Kalianda”.
 - Mengganti aksi ekspor tampilan menjadi unduh Excel dan dialog cetak untuk PDF.
 - Menambahkan tombol Hapus Staf pada setiap baris daftar staf dan endpoint penghapusan staf.
+
+## Lampiran Kegiatan dan Dokumen
+- Menambahkan upload foto kegiatan pada form Tambah tugas baru, dengan pratinjau, validasi gambar, dan batas ukuran 5 MB.
+- Menyimpan foto kegiatan sebagai data laporan agar ikut tersedia saat laporan dibuka kembali.
+- Menambahkan kolom foto pada ekspor Excel dan blok tanda tangan pada bagian bawah ekspor Excel maupun PDF.
+- Format tanda tangan mengikuti contoh: Mengetahui/Kepala Loka dan Kalianda, tanggal realtime/Penanggung Jawab Admin & SDM, dengan nama pejabat contoh.
