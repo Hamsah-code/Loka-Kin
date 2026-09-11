@@ -483,11 +483,18 @@ export default function App() {
   const runExportPdf = (period, refDate) => {
     const { start, end, label } = computeRange(period, refDate);
     const scoped = filterTasksByRange(tasks, start, end);
-    const rows = buildRows(scoped).map((row) => `<tr>${row.slice(0, 7).map((cell) => `<td>${String(cell || "").replaceAll("<", "&lt;")}</td>`).join("")}</tr>`).join("");
+    const rows = scoped.map((t) => {
+      const person = staff.find((s) => s.id === t.staff_id);
+      const cells = [t.title, person?.name || "", person?.department || "", t.status, t.priority, t.target, t.due_date];
+      const photoCell = t.photo_data
+        ? `<img src="${t.photo_data}" alt="foto" class="task-photo"/>`
+        : `<span class="no-photo">–</span>`;
+      return `<tr>${cells.map((c) => `<td>${String(c || "").replaceAll("<", "&lt;")}</td>`).join("")}<td class="photo-cell">${photoCell}</td></tr>`;
+    }).join("");
     const win = window.open("", "_blank");
     if (!win) return toast.error("Izinkan pop-up untuk membuat PDF");
-    win.document.write(`<html><head><meta charset="UTF-8"><title>LOKA-Kin - Laporan ${periodTitle[period]}</title><style>@page{size:A4 landscape;margin:14mm}body{font-family:Arial;color:#111827;margin:0}h1{font-size:20px;margin:0 0 6px}p{font-size:11px;margin:0 0 16px}.report-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10px}.report-table td,.report-table th{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:top;word-break:break-word}.report-table th{background:#e8f0ff}.signature-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:55px;font-size:12px}.signature-table td{border:0;width:50%;text-align:center;vertical-align:top;padding:4px 16px;line-height:1.25}.signature-table .signature-space td{height:88px;padding:0}</style></head><body><h1>LOKA-Kin · Laporan ${periodTitle[period]}</h1><p>${label} · Total ${scoped.length} laporan</p><table class="report-table"><thead><tr><th>Judul</th><th>Staf</th><th>Departemen</th><th>Status</th><th>Prioritas</th><th>Target</th><th>Tenggat</th></tr></thead><tbody>${rows}</tbody></table>${signatureHtml}</body></html>`);
-    win.document.close(); win.focus(); win.print();
+    win.document.write(`<html><head><meta charset="UTF-8"><title>LOKA-Kin - Laporan ${periodTitle[period]}</title><style>@page{size:A4 landscape;margin:14mm}body{font-family:Arial;color:#111827;margin:0}h1{font-size:20px;margin:0 0 6px}p{font-size:11px;margin:0 0 16px}.report-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10px}.report-table td,.report-table th{border:1px solid #cbd5e1;padding:7px;text-align:left;vertical-align:top;word-break:break-word}.report-table th{background:#e8f0ff}.report-table col.c-title{width:16%}.report-table col.c-staff{width:12%}.report-table col.c-dept{width:12%}.report-table col.c-status{width:7%}.report-table col.c-prio{width:8%}.report-table col.c-target{width:11%}.report-table col.c-due{width:9%}.report-table col.c-photo{width:15%}.photo-cell{text-align:center;padding:4px}.task-photo{max-width:110px;max-height:80px;object-fit:cover;border-radius:4px;border:1px solid #dbe3ee}.no-photo{color:#94a3b8;font-size:10px}.signature-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:55px;font-size:12px}.signature-table td{border:0;width:50%;text-align:center;vertical-align:top;padding:4px 16px;line-height:1.25}.signature-table .signature-space td{height:88px;padding:0}</style></head><body><h1>LOKA-Kin · Laporan ${periodTitle[period]}</h1><p>${label} · Total ${scoped.length} laporan</p><table class="report-table"><colgroup><col class="c-title"/><col class="c-staff"/><col class="c-dept"/><col class="c-status"/><col class="c-prio"/><col class="c-target"/><col class="c-due"/><col class="c-photo"/></colgroup><thead><tr><th>Judul</th><th>Staf</th><th>Departemen</th><th>Status</th><th>Prioritas</th><th>Target</th><th>Tenggat</th><th>Foto</th></tr></thead><tbody>${rows}</tbody></table>${signatureHtml}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300);});<\/script></body></html>`);
+    win.document.close();
     toast.success(`Dialog cetak PDF ${periodTitle[period].toLowerCase()} dibuka`);
   };
 
