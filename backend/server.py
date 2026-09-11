@@ -16,18 +16,18 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
-DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum"]
+DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum", "Sarana & Prasarana", "Clinical Supervisor"]
 
 # Pemetaan bagian pada DAFTAR HADIR STAF ke departemen resmi aplikasi
 DEPT_MAP = {
     "Layanan Sosial": "Layanan Rehabilitasi Sosial",
     "Layanan Medis": "Layanan Rehabilitasi Medis",
-    "Clinical Supervisor": "Layanan Rehabilitasi Medis",
+    "Clinical Supervisor": "Clinical Supervisor",
     "Bendahara": "Bendahara",
     "Perencanaan": "Perencanaan",
     "Umum": "Umum",
     "Administrasi & SDM": "Admin",
-    "Sarana Prasarana": "Admin",
+    "Sarana Prasarana": "Sarana & Prasarana",
     "Pengadaan Barang & Jasa": "Admin",
 }
 

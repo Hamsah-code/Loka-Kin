@@ -16,6 +16,7 @@ const columns = [
 const departments = [
   "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas",
   "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum",
+  "Sarana & Prasarana", "Clinical Supervisor",
 ];
 const currentDate = () =>
   new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
