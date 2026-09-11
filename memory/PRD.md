@@ -64,3 +64,9 @@ LOKA-Kin adalah website laporan kinerja harian untuk 85 staf kantor dengan alur 
 - Menyimpan foto kegiatan sebagai data laporan agar ikut tersedia saat laporan dibuka kembali.
 - Menambahkan kolom foto pada ekspor Excel dan blok tanda tangan pada bagian bawah ekspor Excel maupun PDF.
 - Format tanda tangan mengikuti contoh: Mengetahui/Kepala Loka dan Kalianda, tanggal realtime/Penanggung Jawab Admin & SDM, dengan nama pejabat contoh.
+
+## Penyempurnaan Layout Ekspor
+- Menata ulang Excel dan PDF menggunakan tabel dengan kolom tetap, padding seragam, word-wrap, dan header yang konsisten.
+- Menggunakan tabel tanda tangan empat baris dengan dua kolom berukuran sama agar sisi kiri dan kanan selalu sejajar.
+- Menambahkan ruang tanda tangan dengan tinggi tetap sehingga nama pejabat berada pada garis horizontal yang sama.
+- PDF menggunakan format A4 landscape agar tabel laporan lebih lega dan tidak bertumpuk.
