@@ -9,10 +9,17 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
 if not BASE_URL:
     from pathlib import Path
-    for line in (Path("/app/frontend/.env").read_text()).splitlines():
-        if line.startswith("REACT_APP_BACKEND_URL="):
-            BASE_URL = line.split("=", 1)[1].strip()
-            break
+    env_paths = [Path("/home/user/Loka-Kin/frontend/.env"), Path("/app/frontend/.env")]
+    for p in env_paths:
+        if p.exists():
+            for line in p.read_text().splitlines():
+                if line.startswith("REACT_APP_BACKEND_URL="):
+                    BASE_URL = line.split("=", 1)[1].strip()
+                    break
+            if BASE_URL:
+                break
+    if not BASE_URL:
+        BASE_URL = "http://localhost:8000"
 assert BASE_URL
 BASE_URL = BASE_URL.rstrip("/")
 
@@ -23,6 +30,9 @@ VALID_DEPARTMENTS = {
     "Informasi dan Humas",
     "Layanan Rehabilitasi Medis",
     "Layanan Rehabilitasi Sosial",
+    "Umum",
+    "Sarana & Prasarana",
+    "Clinical Supervisor",
 }
 
 SPREADSHEET_ID = "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"
@@ -124,6 +134,57 @@ def test_task_crud_flow(client):
         assert again.status_code == 404
 
 
+def test_target_condition_and_history_workflow(client):
+    staff = client.get(f"{BASE_URL}/api/staff", timeout=20).json()[0]
+    payload = {
+        "title": f"TEST_TARGET_{uuid.uuid4().hex[:8]}",
+        "staff_id": staff["id"],
+        "status": "todo",
+        "target": "Target rencana 10 berkas",
+        "priority": "Tinggi",
+        "due_date": "Hari ini",
+        "notes": "Testing target real condition",
+    }
+    created = client.post(f"{BASE_URL}/api/tasks", json=payload, timeout=20)
+    assert created.status_code == 200
+    t = created.json()
+    task_id = t["id"]
+    try:
+        assert t["target"] == "Target rencana 10 berkas"
+        assert len(t.get("target_history", [])) >= 1
+        assert t["target_history"][0]["status"] == "todo"
+
+        # Transisi ke Doing dengan target riil progres
+        patch_doing = {
+            **t,
+            "status": "doing",
+            "target": "Target riil: 5 berkas telah diverifikasi",
+        }
+        r_doing = client.patch(f"{BASE_URL}/api/tasks/{task_id}", json=patch_doing, timeout=20)
+        assert r_doing.status_code == 200
+        t_doing = r_doing.json()
+        assert t_doing["status"] == "doing"
+        assert t_doing["target"] == "Target riil: 5 berkas telah diverifikasi"
+        assert len(t_doing["target_history"]) >= 2
+        assert t_doing["target_history"][-1]["status"] == "doing"
+
+        # Transisi ke Finish dengan target riil hasil akhir
+        patch_finish = {
+            **t_doing,
+            "status": "finish",
+            "target": "Target riil: 10 berkas 100% selesai dan diarsipkan",
+        }
+        r_finish = client.patch(f"{BASE_URL}/api/tasks/{task_id}", json=patch_finish, timeout=20)
+        assert r_finish.status_code == 200
+        t_finish = r_finish.json()
+        assert t_finish["status"] == "finish"
+        assert t_finish["target"] == "Target riil: 10 berkas 100% selesai dan diarsipkan"
+        assert len(t_finish["target_history"]) >= 3
+        assert t_finish["target_history"][-1]["status"] == "finish"
+    finally:
+        client.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=20)
+
+
 def test_seed_tasks_reference_valid_staff(client):
     tasks = client.get(f"{BASE_URL}/api/tasks", timeout=20).json()
     staff_ids = {s["id"] for s in client.get(f"{BASE_URL}/api/staff", timeout=20).json()}
@@ -145,14 +206,24 @@ def test_analytics_shape(client):
     data = r.json()
     for k in ("total_tasks", "counts", "percentages", "completion_rate", "trends", "departments", "total_staff"):
         assert k in data, f"missing key {k}"
-    assert set(data["counts"].keys()) == {"plan", "doing", "finish"}
+    assert {"todo", "doing", "finish"}.issubset(set(data["counts"].keys()))
     assert isinstance(data["trends"]["daily"], list) and len(data["trends"]["daily"]) > 0
     assert isinstance(data["trends"]["weekly"], list) and len(data["trends"]["weekly"]) > 0
     assert isinstance(data["trends"]["monthly"], list) and len(data["trends"]["monthly"]) > 0
-    assert len(data["departments"]) == 6
+    assert len(data["departments"]) == len(VALID_DEPARTMENTS)
     assert {d["name"] for d in data["departments"]} == VALID_DEPARTMENTS
     assert data["total_staff"] >= 78
     assert 0 <= data["completion_rate"] <= 100
+
+    # Validasi KPI (Key Performance Indicators) per bagian
+    assert "kpi" in data and isinstance(data["kpi"], list)
+    kpi_ids = {sec["id"] for sec in data["kpi"]}
+    assert {"umum", "medis", "sosial"}.issubset(kpi_ids)
+    for sec in data["kpi"]:
+        assert {"id", "title", "overall_score", "indicators"}.issubset(sec.keys())
+        assert len(sec["indicators"]) >= 4
+        for ind in sec["indicators"]:
+            assert {"code", "name", "target", "realization", "status"}.issubset(ind.keys())
 
 
 # ---------- Export ----------
@@ -184,3 +255,57 @@ def test_export_post_logs_simulation(client):
     assert "_id" not in status["last_export"]
     assert status["last_export"]["status"] == "simulated"
     assert status["last_export"]["spreadsheet_id"] == SPREADSHEET_ID
+
+
+def test_task_todo_requirement_and_status_timestamps(client):
+    staff = client.get(f"{BASE_URL}/api/staff", timeout=20).json()[0]
+
+    # 1. Direct creation in 'doing' or 'finish' must be rejected (400)
+    for invalid_status in ["doing", "finish"]:
+        resp = client.post(f"{BASE_URL}/api/tasks", json={
+            "title": f"TEST_INVALID_{invalid_status}",
+            "staff_id": staff["id"],
+            "status": invalid_status,
+        }, timeout=20)
+        assert resp.status_code == 400, f"Expected 400 when creating task directly in {invalid_status}"
+
+    # 2. Creating in 'todo' must succeed and have todo_at timestamp
+    created = client.post(f"{BASE_URL}/api/tasks", json={
+        "title": "TEST_VALID_TODO",
+        "staff_id": staff["id"],
+        "status": "todo",
+        "todo_at": "2026-09-30 08:30",
+    }, timeout=20)
+    assert created.status_code == 200
+    task = created.json()
+    assert task["status"] == "todo"
+    assert task["todo_at"] == "2026-09-30 08:30"
+    task_id = task["id"]
+
+    try:
+        # 3. Transition to 'doing' requires date & time
+        doing_resp = client.patch(f"{BASE_URL}/api/tasks/{task_id}", json={
+            "title": "TEST_VALID_TODO",
+            "staff_id": staff["id"],
+            "status": "doing",
+            "doing_at": "2026-09-30 09:15",
+        }, timeout=20)
+        assert doing_resp.status_code == 200
+        doing_task = doing_resp.json()
+        assert doing_task["status"] == "doing"
+        assert doing_task["doing_at"] == "2026-09-30 09:15"
+        assert doing_task["todo_at"] == "2026-09-30 08:30"
+
+        # 4. Transition to 'finish' records finish_at timestamp
+        finish_resp = client.patch(f"{BASE_URL}/api/tasks/{task_id}", json={
+            "title": "TEST_VALID_TODO",
+            "staff_id": staff["id"],
+            "status": "finish",
+            "finish_at": "2026-09-30 14:00",
+        }, timeout=20)
+        assert finish_resp.status_code == 200
+        finish_task = finish_resp.json()
+        assert finish_task["status"] == "finish"
+        assert finish_task["finish_at"] == "2026-09-30 14:00"
+    finally:
+        client.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=20)
