@@ -1,9 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
+  "version": 2,
+  "name": "loka-kin-frontend",
+  "buildCommand": "npm install --legacy-peer-deps && npm run build",
   "outputDirectory": "build",
-  "framework": null,
+  "installCommand": "npm install --legacy-peer-deps",
+  "framework": "create-react-app",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
   ]
 }
