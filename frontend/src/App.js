@@ -902,6 +902,513 @@ function Metric({ label, value, detail, icon: Icon, tone }) {
   );
 }
 
+function BatchReportPage({ staff, tasks, onBulkSave, onBulkTransition }) {
+  // === State Form Batch ===
+  const [staffId, setStaffId] = useState(staff[0]?.id || "");
+  const [rows, setRows] = useState([{ id: Date.now(), title: "", target: "", priority: "Sedang" }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [filterStaff, setFilterStaff] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [search, setSearch] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(null); // { nextStatus, selectedIds:Set }
+
+  const addRow = () => setRows((prev) => [...prev, { id: Date.now() + Math.random(), title: "", target: "", priority: "Sedang" }]);
+  const removeRow = (id) => setRows((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.id !== id)));
+  const updateRow = (id, field, value) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+
+  const handleSubmit = async () => {
+    const valid = rows.filter((r) => r.title.trim());
+    if (!valid.length) return toast.error("Isi minimal 1 judul tugas");
+    if (!staffId) return toast.error("Pilih penanggung jawab terlebih dahulu");
+    setSubmitting(true);
+    try {
+      await onBulkSave({
+        staffId,
+        rows: valid.map((r) => ({ title: r.title.trim(), target: r.target.trim() || "Belum ditentukan", priority: r.priority })),
+      });
+      // reset form
+      setRows([{ id: Date.now(), title: "", target: "", priority: "Sedang" }]);
+      toast.success(`${valid.length} laporan berhasil ditambahkan ke To Do List`);
+    } catch (err) {
+      toast.error("Gagal menyimpan laporan");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // === Filtered tasks ===
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      const statusNorm = t.status === "plan" ? "todo" : t.status;
+      if (filterStatus !== "all" && statusNorm !== filterStatus) return false;
+      if (filterStaff !== "all" && t.staff_id !== filterStaff) return false;
+      if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [tasks, filterStaff, filterStatus, search]);
+
+  // === Counters per status ===
+  const countBy = (s) => tasks.filter((t) => (t.status === "plan" ? "todo" : t.status) === s).length;
+
+  // === Picker helpers ===
+  const eligibleFor = (nextStatus) => {
+    // nextStatus "doing" → from todo; "finish" → from doing; "todo" → from doing/finish
+    if (nextStatus === "doing") return filteredTasks.filter((t) => (t.status === "plan" ? "todo" : t.status) === "todo");
+    if (nextStatus === "finish") return filteredTasks.filter((t) => t.status === "doing");
+    if (nextStatus === "todo") return filteredTasks.filter((t) => t.status === "doing" || t.status === "finish");
+    return [];
+  };
+
+  const openPicker = (nextStatus) => {
+    const eligible = eligibleFor(nextStatus);
+    if (!eligible.length) {
+      const fromLabel = nextStatus === "doing" ? "To Do List" : nextStatus === "finish" ? "Doing" : "Doing/Finish";
+      return toast.info(`Tidak ada laporan berstatus ${fromLabel} untuk dipindahkan ke ${statusLabelMap[nextStatus] || nextStatus}.`);
+    }
+    setPickerOpen({ nextStatus, selectedIds: new Set() });
+  };
+
+  const togglePickerItem = (id) => {
+    setPickerOpen((prev) => {
+      const ns = new Set(prev.selectedIds);
+      if (ns.has(id)) ns.delete(id);
+      else ns.add(id);
+      return { ...prev, selectedIds: ns };
+    });
+  };
+
+  const confirmPicker = async (extra) => {
+    if (!pickerOpen?.selectedIds.size) return toast.error("Pilih minimal 1 laporan");
+    setSubmitting(true);
+    try {
+      await onBulkTransition(
+        { taskIds: Array.from(pickerOpen.selectedIds), nextStatus: pickerOpen.nextStatus },
+        { targetInput: extra?.targetInput, transitionTime: extra?.transitionTime, note: extra?.note }
+      );
+      setPickerOpen(null);
+      toast.success(`${pickerOpen.selectedIds.size} laporan dipindahkan ke ${statusLabelMap[pickerOpen.nextStatus]}`);
+    } catch (err) {
+      toast.error("Gagal memindahkan laporan");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <PageIntro
+        title="Tambah Laporan Harian"
+        desc="Input banyak judul tugas sekaligus. Pindahkan ke Doing/Finish dengan memilih dari daftar."
+      />
+
+      {/* === Form Batch === */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-head">
+          <div>
+            <span className="eyebrow">FORM INPUT BATCH</span>
+            <h2>Tambah Banyak Laporan</h2>
+          </div>
+        </div>
+
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 600 }}>
+            <span>Penanggung Jawab (untuk semua baris)</span>
+            <select
+              data-testid="batch-staff-select"
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              style={{ padding: "9px 12px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13, maxWidth: 400 }}
+            >
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {s.department}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <strong style={{ fontSize: 12 }}>Daftar Judul Tugas (1 baris = 1 laporan)</strong>
+              <button
+                type="button"
+                className="text-btn"
+                data-testid="batch-add-row"
+                onClick={addRow}
+                style={{ fontSize: 12, padding: "4px 10px" }}
+              >
+                <Plus size={14} /> Tambah Baris
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {rows.map((r, idx) => (
+                <div
+                  key={r.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "32px 1fr 1.4fr 110px 36px",
+                    gap: 8,
+                    alignItems: "center",
+                    padding: 10,
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textAlign: "center" }}>{idx + 1}.</span>
+                  <input
+                    data-testid={`batch-title-${idx}`}
+                    placeholder="Contoh: Rekap absensi pagi"
+                    value={r.title}
+                    onChange={(e) => updateRow(r.id, "title", e.target.value)}
+                    style={{ padding: "7px 10px", borderRadius: 5, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+                  />
+                  <input
+                    data-testid={`batch-target-${idx}`}
+                    placeholder="Target rencana (opsional, contoh: 10 berkas)"
+                    value={r.target}
+                    onChange={(e) => updateRow(r.id, "target", e.target.value)}
+                    style={{ padding: "7px 10px", borderRadius: 5, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+                  />
+                  <select
+                    data-testid={`batch-priority-${idx}`}
+                    value={r.priority}
+                    onChange={(e) => updateRow(r.id, "priority", e.target.value)}
+                    style={{ padding: "7px 10px", borderRadius: 5, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+                  >
+                    <option>Rendah</option>
+                    <option>Sedang</option>
+                    <option>Tinggi</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    data-testid={`batch-remove-${idx}`}
+                    onClick={() => removeRow(r.id)}
+                    disabled={rows.length === 1}
+                    title={rows.length === 1 ? "Minimal 1 baris" : "Hapus baris"}
+                    style={{ opacity: rows.length === 1 ? 0.4 : 1 }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <small style={{ color: "var(--muted)", fontSize: 11, marginTop: 6, display: "block" }}>
+              * Semua baris akan disimpan sebagai laporan baru dengan status <b>To Do List</b>. Anda bisa memindahkan sebagian ke Doing/Finish setelah disimpan.
+            </small>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button
+              type="button"
+              className="primary-btn"
+              data-testid="batch-submit"
+              onClick={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? "Menyimpan..." : `Simpan ${rows.filter((r) => r.title.trim()).length} Laporan`}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* === Daftar Laporan Aktif === */}
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <span className="eyebrow">DAFTAR LAPORAN AKTIF</span>
+            <h2>Pindahkan Status dengan Memilih dari Daftar</h2>
+            <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+              Klik tombol di bawah untuk membuka daftar laporan. Centang laporan yang akan dipindahkan, lalu konfirmasi.
+            </p>
+          </div>
+        </div>
+
+        <div className="toolbar" style={{ padding: 16, borderBottom: "1px solid var(--line)" }}>
+          <div className="search">
+            <Search size={17} />
+            <input
+              data-testid="batch-search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari judul laporan..."
+            />
+          </div>
+          <select className="filter" data-testid="batch-filter-staff" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}>
+            <option value="all">Semua staf</option>
+            {staff.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <select className="filter" data-testid="batch-filter-status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <option value="all">Semua status</option>
+            <option value="todo">To Do List</option>
+            <option value="doing">Doing</option>
+            <option value="finish">Finish</option>
+          </select>
+          <span className="result-count" data-testid="batch-count">{filteredTasks.length} laporan</span>
+        </div>
+
+        {/* Tombol Aksi Pindah Status */}
+        <div style={{ display: "flex", gap: 8, padding: 16, flexWrap: "wrap", borderBottom: "1px solid var(--line)" }}>
+          <button
+            className="primary-btn"
+            data-testid="batch-move-to-doing"
+            onClick={() => openPicker("doing")}
+            style={{ background: "var(--status-doing, #f59e0b)" }}
+          >
+            <ArrowRight size={15} /> Pindahkan ke Doing ({countBy("todo")} To Do tersedia)
+          </button>
+          <button
+            className="primary-btn"
+            data-testid="batch-move-to-finish"
+            onClick={() => openPicker("finish")}
+            style={{ background: "var(--status-finish, #10b981)" }}
+          >
+            <ArrowRight size={15} /> Pindahkan ke Finish ({countBy("doing")} Doing tersedia)
+          </button>
+          <button
+            className="text-btn"
+            data-testid="batch-move-to-todo"
+            onClick={() => openPicker("todo")}
+            title="Kembalikan ke To Do List"
+          >
+            Kembalikan ke To Do
+          </button>
+        </div>
+
+        {/* Tabel Ringkas */}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "var(--surface-2)", textAlign: "left" }}>
+                <th style={{ padding: "10px 14px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", color: "var(--muted)" }}>Judul</th>
+                <th style={{ padding: "10px 14px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", color: "var(--muted)" }}>Penanggung Jawab</th>
+                <th style={{ padding: "10px 14px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", color: "var(--muted)" }}>Target</th>
+                <th style={{ padding: "10px 14px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", color: "var(--muted)" }}>Status</th>
+                <th style={{ padding: "10px 14px", fontWeight: 700, fontSize: 11, textTransform: "uppercase", color: "var(--muted)" }}>Prioritas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTasks.length === 0 ? (
+                <tr>
+                  <td colSpan="5" style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>
+                    Tidak ada laporan sesuai filter. Tambah laporan baru di form atas.
+                  </td>
+                </tr>
+              ) : (
+                filteredTasks.slice(0, 50).map((t) => {
+                  const person = staff.find((s) => s.id === t.staff_id);
+                  const status = t.status === "plan" ? "todo" : t.status || "todo";
+                  return (
+                    <tr key={t.id} style={{ borderTop: "1px solid var(--line)" }} data-testid={`batch-row-${t.id}`}>
+                      <td style={{ padding: "10px 14px", fontWeight: 600 }}>{t.title}</td>
+                      <td style={{ padding: "10px 14px" }}>{person?.name || "-"}</td>
+                      <td style={{ padding: "10px 14px", color: "var(--muted)", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {t.target || <em>(belum ada target)</em>}
+                      </td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <span className={`status-pill status-${status}`}>{statusLabelMap[status]}</span>
+                      </td>
+                      <td style={{ padding: "10px 14px" }}>{t.priority || "Sedang"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+          {filteredTasks.length > 50 && (
+            <div style={{ padding: 10, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
+              Menampilkan 50 dari {filteredTasks.length} laporan. Gunakan filter untuk mempersempit.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* === Modal Picker === */}
+      {pickerOpen && (
+        <BatchMovePickerModal
+          nextStatus={pickerOpen.nextStatus}
+          staff={staff}
+          candidates={eligibleFor(pickerOpen.nextStatus)}
+          selectedIds={pickerOpen.selectedIds}
+          onToggle={togglePickerItem}
+          onSelectAll={() => {
+            const all = eligibleFor(pickerOpen.nextStatus).map((t) => t.id);
+            setPickerOpen((prev) => ({ ...prev, selectedIds: new Set(all) }));
+          }}
+          onClear={() => setPickerOpen((prev) => ({ ...prev, selectedIds: new Set() }))}
+          onClose={() => setPickerOpen(null)}
+          onConfirm={confirmPicker}
+          submitting={submitting}
+        />
+      )}
+    </>
+  );
+}
+
+function BatchMovePickerModal({ nextStatus, staff, candidates, selectedIds, onToggle, onSelectAll, onClear, onClose, onConfirm, submitting }) {
+  const [targetInput, setTargetInput] = useState("");
+  const [transitionTime, setTransitionTime] = useState(() => toDateTimeInput(new Date()));
+  const [note, setNote] = useState("");
+
+  const targetLabel = nextStatus === "doing"
+    ? "Target Riil Progres (Doing) *"
+    : nextStatus === "finish"
+      ? "Target Riil Capaian Akhir (Finish) *"
+      : "Target Riil Rencana (To Do List) *";
+
+  const placeholder = nextStatus === "doing"
+    ? "Contoh: 5 dari 10 berkas telah diverifikasi..."
+    : nextStatus === "finish"
+      ? "Contoh: 10 berkas 100% selesai dan diarsipkan..."
+      : "Contoh: 10 berkas rencana kerja...";
+
+  const handleConfirm = () => {
+    if (!selectedIds.size) return toast.error("Pilih minimal 1 laporan");
+    if (!targetInput.trim()) return toast.error("Kolom target riil wajib diisi untuk semua laporan yang dipilih");
+    if (!transitionTime) return toast.error("Tanggal & jam perubahan status wajib diisi");
+    onConfirm({ targetInput: targetInput.trim(), transitionTime, note: note.trim() });
+  };
+
+  return (
+    <div className="modal-backdrop" data-testid="batch-picker-modal">
+      <div className="modal" style={{ maxWidth: 720 }}>
+        <div className="modal-head">
+          <div>
+            <span className="eyebrow">PILIH LAPORAN UNTUK DIPINDAHKAN</span>
+            <h2>Pindahkan ke {statusLabelMap[nextStatus] || nextStatus}</h2>
+          </div>
+          <button className="icon-button" data-testid="batch-picker-close" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: 16 }}>
+          {/* Bulk Target Riil */}
+          <div className="target-change-alert warn">
+            <AlertCircle size={16} />
+            <div>
+              <strong>Target Riil Berlaku untuk Semua Laporan Terpilih</strong>
+              <div>Isi target riil di bawah. Nilai ini akan diterapkan ke semua {selectedIds.size || candidates.length} laporan yang Anda pilih.</div>
+            </div>
+          </div>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600 }}>
+            <span>{targetLabel}</span>
+            <input
+              type="text"
+              data-testid="batch-picker-target"
+              value={targetInput}
+              onChange={(e) => setTargetInput(e.target.value)}
+              placeholder={placeholder}
+              style={{ padding: "9px 12px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+            />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600 }}>
+              <span>Tanggal &amp; Jam *</span>
+              <input
+                type="datetime-local"
+                data-testid="batch-picker-time"
+                value={transitionTime}
+                onChange={(e) => setTransitionTime(e.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600 }}>
+              <span>Catatan (opsional)</span>
+              <input
+                type="text"
+                data-testid="batch-picker-note"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Misal: update tengah hari"
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--input-bg)", color: "var(--input-ink)", fontSize: 13 }}
+              />
+            </label>
+          </div>
+
+          {/* Daftar Kandidat dengan Checkbox */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <strong style={{ fontSize: 12 }}>
+                {candidates.length} laporan tersedia · {selectedIds.size} dipilih
+              </strong>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className="text-btn" onClick={onSelectAll} style={{ fontSize: 11 }}>
+                  Pilih Semua
+                </button>
+                <button type="button" className="text-btn" onClick={onClear} style={{ fontSize: 11 }}>
+                  Bersihkan
+                </button>
+              </div>
+            </div>
+
+            <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface-2)" }}>
+              {candidates.map((t) => {
+                const person = staff.find((s) => s.id === t.staff_id);
+                const isSel = selectedIds.has(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "10px 12px",
+                      borderBottom: "1px solid var(--line)",
+                      cursor: "pointer",
+                      background: isSel ? "rgba(59,130,246,0.08)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid={`batch-picker-item-${t.id}`}
+                      checked={isSel}
+                      onChange={() => onToggle(t.id)}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {t.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                        {person?.name || "Staf"} · Target: {t.target || "(belum ada)"}
+                      </div>
+                    </div>
+                    <span className={`status-pill status-${t.status === "plan" ? "todo" : t.status || "todo"}`} style={{ fontSize: 10 }}>
+                      {statusLabelMap[t.status === "plan" ? "todo" : t.status || "todo"]}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: 16, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="text-btn" onClick={onClose} disabled={submitting}>
+            Batal
+          </button>
+          <button
+            className="primary-btn"
+            data-testid="batch-picker-confirm"
+            onClick={handleConfirm}
+            disabled={submitting || !selectedIds.size}
+          >
+            {submitting ? "Memindahkan..." : `Pindahkan ${selectedIds.size} Laporan`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Overview({ analytics, tasks, staffCount, onGo }) {
   const counts = analytics.counts || {};
   const percentages = analytics.percentages || {};
@@ -1307,6 +1814,90 @@ export default function App() {
     ),
     [tasks, query, selectedStaff]
   );
+
+  const bulkSave = async ({ staffId, rows }) => {
+    if (!rows.length) return;
+    try {
+      const now = new Date().toISOString();
+      const created = await Promise.all(
+        rows.map((r) =>
+          axios.post(`${API}/tasks`, {
+            title: r.title,
+            staff_id: staffId,
+            status: "todo",
+            target: r.target || "Belum ditentukan",
+            priority: r.priority || "Sedang",
+            todo_at: now,
+            target_history: [
+              {
+                status: "todo",
+                target: r.target || "Belum ditentukan",
+                timestamp: now,
+                note: "Target awal To Do List (batch input)",
+              },
+            ],
+          })
+        )
+      );
+      setTasks((prev) => [...created.map((c) => c.data).reverse(), ...prev]);
+      await load();
+    } catch (err) {
+      toast.error("Sebagian laporan gagal disimpan");
+      throw err;
+    }
+  };
+
+  const bulkTransition = async ({ taskIds, nextStatus }, extra = {}) => {
+    if (!taskIds.length) return;
+    try {
+      const now = new Date().toISOString();
+      const transitionTime = extra?.transitionTime || now;
+      const realTarget = extra?.targetInput || "Belum ditentukan";
+      const note = extra?.note || `Target riil saat status ${statusLabelMap[nextStatus] || nextStatus.toUpperCase()}`;
+
+      await Promise.all(
+        taskIds.map((id) => {
+          const t = tasks.find((x) => x.id === id);
+          if (!t) return Promise.resolve();
+          const existingHistory = [...(t.target_history || [])];
+          if (existingHistory.length === 0 && t.target) {
+            existingHistory.push({
+              status: t.status === "plan" ? "todo" : t.status || "todo",
+              target: t.target,
+              timestamp: t.status_updated_at || t.todo_at || t.created_at || transitionTime,
+              note: "Target awal",
+            });
+          }
+          const updatedHistory = [
+            ...existingHistory,
+            {
+              status: nextStatus,
+              target: realTarget,
+              timestamp: transitionTime,
+              note,
+            },
+          ];
+          const updated = {
+            ...t,
+            status: nextStatus,
+            target: realTarget,
+            target_history: updatedHistory,
+            status_updated_at: transitionTime,
+          };
+          if (nextStatus === "doing") updated.doing_at = transitionTime;
+          else if (nextStatus === "finish") {
+            if (!updated.doing_at) updated.doing_at = t.todo_at || transitionTime;
+            updated.finish_at = transitionTime;
+          } else if (nextStatus === "todo") updated.todo_at = transitionTime;
+          return axios.patch(`${API}/tasks/${id}`, updated);
+        })
+      );
+      await load();
+    } catch (err) {
+      toast.error("Sebagian laporan gagal dipindahkan");
+      throw err;
+    }
+  };
 
   const save = async (form) => {
     try {
@@ -1747,6 +2338,7 @@ export default function App() {
   const nav = [
     { id: "overview", label: "Ringkasan", icon: LayoutDashboard },
     { id: "board", label: "Laporan harian", icon: ClipboardList },
+    { id: "batch", label: "Tambah Laporan", icon: Plus },
     { id: "staff", label: "Daftar staf", icon: Users },
     { id: "analytics", label: "Analitik", icon: BarChart3 },
   ];
@@ -1865,6 +2457,7 @@ export default function App() {
             </>
           )}
           {active === "staff" && <StaffPage staff={staff} tasks={tasks} onAdd={() => setModal({ staffModal: true })} onDelete={deleteStaff} />}
+          {active === "batch" && <BatchReportPage staff={staff} tasks={tasks} onBulkSave={bulkSave} onBulkTransition={bulkTransition} />}
           {active === "analytics" && <Analytics analytics={analytics} />}
         </div>
       </main>
