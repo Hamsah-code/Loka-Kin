@@ -1,0 +1,19 @@
+# Railway deployment config
+# https://docs.railway.app/reference/config-as-code
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/docs"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[services]]
+name = "loka-kin-api"
+source = "backend"
+
+[variables]
+MONGO_URL = "mock"
+DB_NAME = "loka_kin"

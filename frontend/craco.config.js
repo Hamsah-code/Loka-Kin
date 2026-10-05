@@ -108,6 +108,8 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Allow all hosts (sandbox preview uses a proxied host)
+  devServerConfig.allowedHosts = 'all';
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
