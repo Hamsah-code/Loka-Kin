@@ -54,6 +54,32 @@ const formatDisplayDateTime = (val) => {
   }
 };
 
+// Ubah nilai tenggat apa pun menjadi format tanggal ISO (yyyy-mm-dd) untuk input type="date".
+const toDateInputValue = (val) => {
+  if (!val) return "";
+  const raw = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}[T ]/.test(raw)) return raw.slice(0, 10);
+  const lower = raw.toLowerCase();
+  const base = new Date();
+  if (lower.includes("hari ini") || lower === "today") return toDateInput(base);
+  if (lower.includes("besok") || lower === "tomorrow") {
+    base.setDate(base.getDate() + 1);
+    return toDateInput(base);
+  }
+  return "";
+};
+
+// Tampilkan tenggat dalam format tanggal Indonesia yang mudah dibaca.
+const formatDisplayDate = (val) => {
+  if (!val) return "";
+  const iso = toDateInputValue(val);
+  if (!iso) return String(val);
+  const d = new Date(`${iso}T00:00:00`);
+  if (isNaN(d.getTime())) return String(val);
+  return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(d);
+};
+
 const statusLabelMap = { todo: "To Do List", plan: "To Do List", doing: "Doing", finish: "Finish" };
 
 function computeRange(period, refDateStr) {
@@ -146,7 +172,7 @@ function TaskCard({ task, staff, onEdit, onTransition }) {
 
       <div className="task-bottom">
         <span className="person"><Avatar name={person?.name} />{person?.name?.split(" ").slice(0, 2).join(" ")}</span>
-        <span className="due">{task.due_date || "Tanpa tenggat"}</span>
+        <span className="due">{task.due_date ? formatDisplayDate(task.due_date) : "Tanpa tenggat"}</span>
       </div>
 
       {onTransition && (
@@ -390,6 +416,23 @@ function TaskModal({ task, staff, onClose, onSave }) {
   const initialStatus = task ? (task.status === "plan" ? "todo" : (task.status || "todo")) : "todo";
   const initialTarget = task ? (task.target || "") : "";
 
+  const blankRow = () => ({ title: "", priority: "Sedang", target: "", due_date: "" });
+
+  // Daftar Tugas: staf dapat menuliskan beberapa tugas sekaligus dalam satu laporan.
+  const [rows, setRows] = useState(() => [
+    {
+      title: task?.title || "",
+      priority: task?.priority || "Sedang",
+      target: task?.target || "",
+      due_date: task?.due_date || "",
+    },
+  ]);
+
+  const updateRow = (idx, patch) => setRows((prev) => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+  const addRow = () => setRows((prev) => [...prev, blankRow()]);
+  const removeRow = (idx) => setRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
+  const rowTestId = (base, idx) => (idx === 0 ? base : `${base}-${idx + 1}`);
+
   const [form, setForm] = useState(() => {
     if (task) {
       return {
@@ -426,17 +469,23 @@ function TaskModal({ task, staff, onClose, onSave }) {
   });
 
   const statusChanged = isEditing && form.status !== initialStatus;
-  const targetLabel = form.status === "doing"
-    ? "Target Riil Progres (Doing) *"
-    : form.status === "finish"
-      ? "Target Riil Capaian Akhir (Finish) *"
-      : "Target Riil Rencana (To Do List) *";
 
-  const targetPlaceholder = form.status === "doing"
-    ? "Contoh: 5 dari 10 berkas telah diverifikasi (kondisi riil progres)..."
-    : form.status === "finish"
-      ? "Contoh: 10 berkas 100% selesai dan diarsipkan (kondisi riil akhir)..."
-      : "Contoh: 10 berkas layanan harian...";
+  // Tugas pertama pada daftar mengikuti status laporan; tugas tambahan selalu masuk To Do List.
+  const targetLabelFor = (idx) => {
+    if (isEditing && idx === 0) {
+      if (form.status === "doing") return "Target Riil Progres (Doing) *";
+      if (form.status === "finish") return "Target Riil Capaian Akhir (Finish) *";
+    }
+    return "Target Riil Rencana (To Do List) *";
+  };
+
+  const targetPlaceholderFor = (idx) => {
+    if (isEditing && idx === 0) {
+      if (form.status === "doing") return "Contoh: 5 dari 10 berkas telah diverifikasi (kondisi riil progres)...";
+      if (form.status === "finish") return "Contoh: 10 berkas 100% selesai dan diarsipkan (kondisi riil akhir)...";
+    }
+    return "Contoh: 10 berkas layanan harian...";
+  };
 
   const change = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -466,9 +515,20 @@ function TaskModal({ task, staff, onClose, onSave }) {
   };
 
   const handleSave = () => {
-    if (!form.title.trim()) return toast.error("Nama tugas wajib diisi");
-    if (!form.target.trim()) {
-      return toast.error("Kolom target wajib diisi sesuai kondisi riil tugas.");
+    const cleaned = rows.map((row) => ({
+      title: (row.title || "").trim(),
+      priority: row.priority || "Sedang",
+      target: (row.target || "").trim(),
+      due_date: (row.due_date || "").trim(),
+    }));
+
+    const emptyTitle = cleaned.findIndex((row) => !row.title);
+    if (emptyTitle !== -1) {
+      return toast.error(`Nama tugas pada baris ${emptyTitle + 1} di Daftar Tugas wajib diisi`);
+    }
+    const emptyTarget = cleaned.findIndex((row) => !row.target);
+    if (emptyTarget !== -1) {
+      return toast.error(`Target Riil Rencana (To Do List) pada tugas ${emptyTarget + 1} wajib diisi sesuai kondisi riil tugas.`);
     }
     if (!form.todo_at) return toast.error("Tanggal & jam To Do List wajib diisi");
 
@@ -479,11 +539,18 @@ function TaskModal({ task, staff, onClose, onSave }) {
       return toast.error("Tanggal & jam status Finish wajib diisi sebelum menyimpan");
     }
 
-    const payload = { ...form };
     const currentNow = toDateTimeInput(new Date());
+    const primary = cleaned[0];
+    const payload = {
+      ...form,
+      title: primary.title,
+      priority: primary.priority,
+      target: primary.target,
+      due_date: primary.due_date,
+    };
 
     // Rekam perubahan target riil ke riwayat
-    if (statusChanged || (isEditing && form.target.trim() !== initialTarget.trim())) {
+    if (statusChanged || (isEditing && primary.target !== initialTarget.trim())) {
       const transitionTime = form.status === "finish"
         ? (form.finish_at || currentNow)
         : form.status === "doing"
@@ -494,7 +561,7 @@ function TaskModal({ task, staff, onClose, onSave }) {
         ...(form.target_history || []),
         {
           status: form.status,
-          target: form.target.trim(),
+          target: primary.target,
           timestamp: transitionTime,
           note: form.notes ? `Catatan: ${form.notes.slice(0, 50)}` : `Target riil saat status ${form.status.toUpperCase()}`,
         },
@@ -503,14 +570,40 @@ function TaskModal({ task, staff, onClose, onSave }) {
       payload.target_history = [
         {
           status: "todo",
-          target: form.target.trim(),
+          target: primary.target,
           timestamp: form.todo_at || currentNow,
           note: "Target awal To Do List",
         },
       ];
     }
 
-    onSave(payload);
+    // Tugas tambahan pada Daftar Tugas dibuat sebagai laporan To Do List baru.
+    const additional = cleaned.slice(1).map((row) => ({
+      title: row.title,
+      staff_id: form.staff_id,
+      status: "todo",
+      target: row.target,
+      priority: row.priority,
+      due_date: row.due_date,
+      notes: "",
+      proof_link: "",
+      photo_data: "",
+      photo_name: "",
+      todo_at: form.todo_at || currentNow,
+      doing_at: "",
+      finish_at: "",
+      status_updated_at: form.todo_at || currentNow,
+      target_history: [
+        {
+          status: "todo",
+          target: row.target,
+          timestamp: form.todo_at || currentNow,
+          note: "Target awal To Do List",
+        },
+      ],
+    }));
+
+    onSave([payload, ...additional]);
   };
 
   return (
@@ -519,12 +612,97 @@ function TaskModal({ task, staff, onClose, onSave }) {
         <div className="modal-head">
           <div>
             <span className="eyebrow">LAPORAN HARIAN</span>
-            <h2>{isEditing ? "Edit Laporan Tugas" : "Tambah To Do List Baru"}</h2>
+            <h2>To Do List</h2>
+            <p className="modal-subtitle">Daftar rencana tugas yang akan dikerjakan, lengkap dengan prioritas, target riil, dan tenggat.</p>
           </div>
           <button className="icon-button" data-testid="task-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="form-grid">
-          <label>Nama tugas<input autoFocus data-testid="task-title-input" name="title" value={form.title} onChange={change} placeholder="Contoh: Rekap laporan layanan" /></label>
+          {/* Daftar Tugas: satu laporan dapat memuat beberapa tugas */}
+          <div className="task-list-section full" data-testid="task-list-section">
+            <div className="task-list-head">
+              <div>
+                <span className="task-list-title"><ClipboardList size={14} /> Daftar Tugas</span>
+                <small>Staf dapat menuliskan beberapa tugas yang akan dikerjakan dalam satu laporan.</small>
+              </div>
+              <span className="task-count-pill" data-testid="task-row-count">{rows.length} tugas</span>
+            </div>
+
+            {rows.map((row, idx) => (
+              <div className="task-row" data-testid={`task-row-${idx + 1}`} key={idx}>
+                <div className="task-row-head">
+                  <span className="task-row-index">Tugas {idx + 1}</span>
+                  {rows.length > 1 && (
+                    <button
+                      type="button"
+                      className="row-remove"
+                      data-testid={`task-row-remove-${idx + 1}`}
+                      title="Hapus tugas ini"
+                      onClick={() => removeRow(idx)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <label>Nama tugas
+                  <input
+                    autoFocus={idx === 0}
+                    data-testid={rowTestId("task-title-input", idx)}
+                    name={`title-${idx}`}
+                    value={row.title}
+                    onChange={(e) => updateRow(idx, { title: e.target.value })}
+                    placeholder="Contoh: Rekap laporan layanan"
+                  />
+                </label>
+
+                <div className="task-row-grid">
+                  <label>Prioritas
+                    <select
+                      data-testid={rowTestId("task-priority-select", idx)}
+                      name={`priority-${idx}`}
+                      value={row.priority}
+                      onChange={(e) => updateRow(idx, { priority: e.target.value })}
+                    >
+                      <option>Rendah</option>
+                      <option>Sedang</option>
+                      <option>Tinggi</option>
+                    </select>
+                  </label>
+                  <label>Tenggat
+                    <input
+                      type="date"
+                      data-testid={rowTestId("task-due-input", idx)}
+                      name={`due_date-${idx}`}
+                      value={toDateInputValue(row.due_date)}
+                      onChange={(e) => updateRow(idx, { due_date: e.target.value })}
+                    />
+                    {row.due_date && !toDateInputValue(row.due_date) && (
+                      <small className="legacy-due">Tenggat sebelumnya: {row.due_date}</small>
+                    )}
+                  </label>
+                </div>
+
+                <label>
+                  <span>{targetLabelFor(idx)}</span>
+                  <input
+                    data-testid={rowTestId("task-target-input", idx)}
+                    name={`target-${idx}`}
+                    value={row.target}
+                    onChange={(e) => updateRow(idx, { target: e.target.value })}
+                    placeholder={targetPlaceholderFor(idx)}
+                    required
+                  />
+                  <small className="field-hint">* Wajib diisi sesuai kondisi riil tugas</small>
+                </label>
+              </div>
+            ))}
+
+            <button type="button" className="add-task-row" data-testid="add-task-row-button" onClick={addRow}>
+              <Plus size={15} /> Tambah tugas lain
+            </button>
+          </div>
+
           <label>Penanggung jawab<select data-testid="task-staff-select" name="staff_id" value={form.staff_id} onChange={change}>{staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.department}</option>)}</select></label>
           <label>
             Status
@@ -540,7 +718,6 @@ function TaskModal({ task, staff, onClose, onSave }) {
               </select>
             )}
           </label>
-          <label>Prioritas<select data-testid="task-priority-select" name="priority" value={form.priority} onChange={change}><option>Rendah</option><option>Sedang</option><option>Tinggi</option></select></label>
 
           {/* Banner Peringatan jika status diubah */}
           {statusChanged && (
@@ -549,25 +726,11 @@ function TaskModal({ task, staff, onClose, onSave }) {
               <div>
                 <b>Perubahan Status ke {statusLabelMap[form.status] || form.status} Terdeteksi:</b>
                 <div>
-                  Kondisi riil pekerjaan telah berubah. Staf <b>wajib memperbarui kolom Target</b> di bawah sesuai capaian atau progres riil saat ini.
+                  Kondisi riil pekerjaan telah berubah. Staf <b>wajib memperbarui kolom Target Riil</b> pada tugas yang bersangkutan di atas sesuai capaian atau progres riil saat ini.
                 </div>
               </div>
             </div>
           )}
-
-          <label>
-            <span>{targetLabel}</span>
-            <input
-              data-testid="task-target-input"
-              name="target"
-              value={form.target}
-              onChange={change}
-              placeholder={targetPlaceholder}
-              required
-            />
-            <small style={{ color: "var(--muted)", fontSize: 10 }}>* Wajib diisi sesuai kondisi riil tugas</small>
-          </label>
-          <label>Tenggat<input data-testid="task-due-input" name="due_date" value={form.due_date} onChange={change} placeholder="Contoh: Hari ini" /></label>
 
           {/* Section Pencatatan Tanggal & Jam Status */}
           <div className="status-time-section full">
@@ -902,7 +1065,7 @@ function Metric({ label, value, detail, icon: Icon, tone }) {
   );
 }
 
-function Overview({ analytics, tasks, staffCount, onGo }) {
+function Overview({ analytics, tasks, staffCount, onGo, onCreate }) {
   const counts = analytics.counts || {};
   const percentages = analytics.percentages || {};
   const todoCount = counts.todo ?? counts.plan ?? 0;
@@ -914,7 +1077,7 @@ function Overview({ analytics, tasks, staffCount, onGo }) {
       <PageIntro
         title="Tabik Pun Staf Loka Rehabilitasi Narkotika Kalianda"
         desc="Berikut ringkasan kinerja tim untuk hari ini."
-        action={<button className="primary-btn" data-testid="overview-add-button" onClick={onGo}><Plus size={17} /> Buat laporan</button>}
+        action={<button className="primary-btn" data-testid="overview-add-button" onClick={onCreate}><Plus size={17} /> Buat laporan</button>}
       />
       <div className="metric-grid">
         <Metric label="Total laporan" value={analytics.total_tasks || tasks.length} detail="Laporan aktif hari ini" icon={ClipboardList} tone="blue" />
@@ -1308,18 +1471,39 @@ export default function App() {
     [tasks, query, selectedStaff]
   );
 
-  const save = async (form) => {
+  // Satu laporan To Do List dapat memuat beberapa tugas sekaligus (payload berupa array).
+  const save = async (input) => {
+    const normalize = (form) => ({
+      ...form,
+      status: form.status === "plan" ? "todo" : (form.status || "todo"),
+    });
+    const payloads = (Array.isArray(input) ? input : [input]).map(normalize);
+    const extraCount = Math.max(0, payloads.length - 1);
+
     try {
-      const payload = {
-        ...form,
-        status: form.status === "plan" ? "todo" : (form.status || "todo"),
-      };
-      const res = await (modal?.id ? axios.patch(`${API}/tasks/${modal.id}`, payload) : axios.post(`${API}/tasks`, payload));
-      setTasks((prev) => modal?.id ? prev.map((t) => t.id === modal.id ? res.data : t) : [res.data, ...prev]);
-      setModal(null); await load(); toast.success("Laporan tersimpan");
+      if (modal?.id) {
+        const [primary, ...extras] = payloads;
+        const res = await axios.patch(`${API}/tasks/${modal.id}`, primary);
+        setTasks((prev) => prev.map((t) => (t.id === modal.id ? res.data : t)));
+        for (const extra of extras) {
+          await axios.post(`${API}/tasks`, { ...extra, status: "todo" });
+        }
+        toast.success(
+          extraCount > 0
+            ? `Laporan diperbarui & ${extraCount} tugas baru masuk To Do List`
+            : "Laporan tersimpan"
+        );
+      } else {
+        for (const payload of payloads) {
+          await axios.post(`${API}/tasks`, payload);
+        }
+        toast.success(extraCount > 0 ? `${payloads.length} tugas masuk To Do List` : "Laporan tersimpan");
+      }
+      setModal(null);
+      await load();
     } catch (err) {
       const msg = err.response?.data?.detail || "Gagal menyimpan laporan";
-      toast.error(msg);
+      toast.error(Array.isArray(msg) ? "Lengkapi data tugas terlebih dahulu" : msg);
     }
   };
   const addStaff = async (form) => {
@@ -1403,7 +1587,7 @@ export default function App() {
       formatExportTime(t.todo_at || t.created_at),
       formatExportTime(t.doing_at),
       formatExportTime(t.finish_at),
-      t.due_date,
+      formatDisplayDate(t.due_date),
       t.notes,
       t.proof_link,
       t.photo_name ? `Foto: ${t.photo_name}` : "",
@@ -1451,7 +1635,7 @@ export default function App() {
           formatExportTime(t.todo_at || t.created_at),
           formatExportTime(t.doing_at),
           formatExportTime(t.finish_at),
-          t.due_date,
+          formatDisplayDate(t.due_date),
           t.notes,
           t.proof_link,
           t.photo_name ? `Foto: ${t.photo_name}` : "",
@@ -1506,7 +1690,7 @@ export default function App() {
             formatExportTime(t.todo_at || t.created_at),
             formatExportTime(t.doing_at),
             formatExportTime(t.finish_at),
-            t.due_date,
+            formatDisplayDate(t.due_date),
             t.notes,
             t.proof_link,
             t.photo_name ? `Foto: ${t.photo_name}` : "",
@@ -1585,7 +1769,7 @@ export default function App() {
           <td>${curTime}</td>
           <td>${t.priority}</td>
           <td>${targetCell}</td>
-          <td>${t.due_date || "-"}</td>
+          <td>${formatDisplayDate(t.due_date) || "-"}</td>
           <td class="photo-cell">${photoCell}</td>
         </tr>`;
       }).join("");
@@ -1669,7 +1853,7 @@ export default function App() {
             <td>${curTime}</td>
             <td>${t.priority}</td>
             <td>${targetCell}</td>
-            <td>${t.due_date || "-"}</td>
+            <td>${formatDisplayDate(t.due_date) || "-"}</td>
             <td class="photo-cell">${photoCell}</td>
           </tr>`;
         }).join("");
@@ -1796,7 +1980,15 @@ export default function App() {
           </div>
         </header>
         <div className="content">
-          {active === "overview" && <Overview analytics={analytics} tasks={tasks} staffCount={analytics.total_staff || staff.length} onGo={() => go("board")} />}
+          {active === "overview" && (
+            <Overview
+              analytics={analytics}
+              tasks={tasks}
+              staffCount={analytics.total_staff || staff.length}
+              onGo={() => go("board")}
+              onCreate={() => { setActive("board"); setModal({ status: "todo" }); }}
+            />
+          )}
           {active === "board" && (
             <>
               <PageIntro title="Laporan harian" desc="Pantau progres pekerjaan tim dalam satu ruang kerja."

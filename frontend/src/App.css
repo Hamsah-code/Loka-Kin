@@ -145,6 +145,34 @@ nav{display:grid;gap:5px}
 .form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus{border-color:#5c8ce6;box-shadow:0 0 0 3px #5c8ce622}
 .form-grid .full{grid-column:1/-1}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+.modal-subtitle{margin:0;font-size:11.5px;line-height:1.45;color:var(--muted);max-width:430px}
+
+/* Daftar Tugas: satu laporan dapat memuat beberapa tugas */
+.task-list-section{background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.task-list-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.task-list-title{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:800;color:var(--ink);text-transform:uppercase;letter-spacing:.5px}
+.task-list-head small{display:block;font-size:10.5px;font-weight:500;color:var(--muted);margin-top:5px;line-height:1.45;max-width:410px}
+.task-count-pill{font-size:10.5px;font-weight:700;color:#2864db;background:#eaf1ff;border:1px solid #c9dcff;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.task-row{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 13px;display:flex;flex-direction:column;gap:10px}
+.task-row-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.task-row-index{font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.row-remove{border:1px solid var(--line);background:transparent;color:#b45309;border-radius:6px;width:26px;height:26px;display:grid;place-items:center;cursor:pointer;transition:.2s}
+.row-remove:hover{border-color:#f5ad26;background:#fffbeb}
+.task-row-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.task-row label{color:var(--muted);font-size:11px;font-weight:700}
+.task-row .field-hint,.task-row .legacy-due{display:block;margin-top:5px;font-size:10px;font-weight:500;color:var(--muted)}
+.task-row .legacy-due{color:#b45309}
+.add-task-row{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px dashed #9db8e8;background:transparent;color:#2864db;border-radius:8px;padding:10px;font-size:11.5px;font-weight:700;cursor:pointer;transition:.2s}
+.add-task-row:hover{background:#eaf1ff;border-color:#2864db}
+
+/* Daftar Tugas — dark mode */
+.dark-mode .task-list-section{background:#111e30;border-color:#283a54}
+.dark-mode .task-row{background:#17253b;border-color:#2b3f5c}
+.dark-mode .task-count-pill{background:#172847;border-color:#1d4ed8;color:#bfdbfe}
+.dark-mode .row-remove:hover{background:#382405;border-color:#b45309}
+.dark-mode .add-task-row{border-color:#33486b;color:#93c5fd}
+.dark-mode .add-task-row:hover{background:#172847;border-color:#5c8ce6}
+.dark-mode .task-row .legacy-due{color:#fcd34d}
 
 /* Export dialog */
 .export-modal{width:min(520px,100%)}
