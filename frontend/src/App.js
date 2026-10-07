@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle, ArrowRight, Award, BarChart3, Building2, Calendar, Camera, CheckCircle2, ClipboardList, Clock, Download, FileSpreadsheet, FileText,
-  HeartHandshake, History, Layers, LayoutDashboard, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
+  HeartHandshake, History, Home, Layers, LayoutDashboard, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import "@/App.css";
+import LandingPage from "@/components/LandingPage";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
 const columns = [
@@ -1755,11 +1756,12 @@ export default function App() {
   const [exportMode, setExportMode] = useState(null); // 'excel' | 'pdf' | null
   const [pdfPreview, setPdfPreview] = useState(null);
   const [transitionModal, setTransitionModal] = useState(null);
-  const [active, setActive] = useState("overview");
+  const [active, setActive] = useState("home");
   const [query, setQuery] = useState("");
   const [selectedStaff, setSelectedStaff] = useState("all");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("loka-kin-theme") === "dark");
+  const initialLoadStarted = useRef(false);
 
   const load = async () => {
     try {
@@ -1769,7 +1771,13 @@ export default function App() {
       setTasks(t.data); setStaff(s.data); setAnalytics(a.data);
     } catch { toast.error("Data belum dapat dimuat"); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // React StrictMode memanggil effect mount dua kali pada development.
+    // Guard ini menjaga fetch awal tetap tunggal agar kartu dashboard tidak berkedip.
+    if (initialLoadStarted.current) return;
+    initialLoadStarted.current = true;
+    load();
+  }, []);
   useEffect(() => {
     document.body.classList.toggle("dark-mode", dark);
     localStorage.setItem("loka-kin-theme", dark ? "dark" : "light");
@@ -2296,6 +2304,7 @@ export default function App() {
   };
 
   const nav = [
+    { id: "home", label: "Home", icon: Home },
     { id: "overview", label: "Ringkasan", icon: LayoutDashboard },
     { id: "board", label: "Laporan harian", icon: ClipboardList },
     { id: "staff", label: "Daftar staf", icon: Users },
@@ -2303,6 +2312,15 @@ export default function App() {
   ];
   const today = currentDate();
   const go = (id) => { setActive(id); setMobileOpen(false); };
+
+  if (active === "home") {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <LandingPage onNavigateToDashboard={() => go("overview")} />
+      </>
+    );
+  }
 
   return (
     <div className="app-shell">

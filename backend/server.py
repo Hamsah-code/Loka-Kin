@@ -128,6 +128,7 @@ TITLE_TOKENS = {"dr", "ns", "hj", "h", "drs", "dra", "mr", "mrs"}
 
 # Sidik jari daftar staf resmi terakhir yang sudah disinkronkan ke database.
 _seed_signature: Optional[str] = None
+_seed_lock = asyncio.Lock()
 
 
 def make_initials(name: str) -> str:
@@ -283,6 +284,16 @@ async def save_roster(rows: List[Dict[str, Any]], source: str) -> None:
 
 
 async def seed_data(force: bool = False):
+    """Jalankan sinkronisasi roster paling banyak satu kali pada satu waktu."""
+    async with _seed_lock:
+        roster, _source = await active_roster()
+        signature = hashlib.sha1(json.dumps(roster, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        if not force and _seed_signature == signature:
+            return
+        await _sync_seed_data(force)
+
+
+async def _sync_seed_data(force: bool = False):
     """Sinkronkan daftar staf resmi (SEED_STAFF) ke database secara idempotent.
 
     Staf yang belum ada dibuat sebagai ``staff-1..staff-N`` sesuai urutan daftar
@@ -384,6 +395,10 @@ async def seed_data(force: bool = False):
             {"id": "task-4", "title": "Perbarui SOP meja layanan", "staff_id": staff[3]["id"], "status": "doing", "target": "3 bab", "priority": "Tinggi", "due_date": "Besok", "notes": "Review bersama tim", "proof_link": "", "photo_data": "", "photo_name": "", "todo_at": t1, "doing_at": t3, "finish_at": None, "status_updated_at": t3, "created_at": now},
         ]
         await db.tasks.insert_many(demo)
+
+    # Cache signature setelah sinkronisasi selesai agar request GET berikutnya
+    # tidak menulis ulang seluruh database dan mengganggu tampilan dashboard.
+    _seed_signature = signature
 
 
 @api.get("/")

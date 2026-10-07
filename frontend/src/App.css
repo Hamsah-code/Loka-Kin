@@ -13,22 +13,23 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif}
 
 .app-shell{display:flex;min-height:100vh}
 
-/* Sidebar (constant dark) */
-.sidebar{width:248px;background:#10243d;color:#dbe7f5;display:flex;flex-direction:column;padding:28px 18px;flex-shrink:0}
+/* Sidebar — warna senada dengan landing Home */
+.sidebar{width:248px;background:linear-gradient(180deg,#087eeb 0%,#2458ec 48%,#4935e3 100%);color:#eff5ff;display:flex;flex-direction:column;padding:28px 18px;flex-shrink:0;position:relative;isolation:isolate;overflow:hidden}
+.sidebar::before{content:"";position:absolute;z-index:-1;top:-100px;right:-130px;width:300px;height:300px;border:1px solid rgba(255,255,255,.12);border-radius:50%;box-shadow:0 0 0 30px rgba(255,255,255,.025),0 0 0 65px rgba(255,255,255,.02);pointer-events:none}
 .brand{display:flex;gap:11px;align-items:center;padding:0 10px 42px}
-.brand-mark{width:36px;height:36px;background:#3d7cf0;border-radius:10px;display:grid;place-items:center;color:#fff;font:800 13px 'Plus Jakarta Sans'}
+.brand-mark{width:36px;height:36px;background:linear-gradient(145deg,#ffd45c,#f4a700);border-radius:10px;display:grid;place-items:center;color:#1746ba;font:800 13px 'Plus Jakarta Sans';box-shadow:0 7px 16px rgba(16,40,120,.2)}
 .brand b{display:block;color:#fff;font:800 18px 'Plus Jakarta Sans';letter-spacing:.2px}
-.brand small{color:#a3b8d1;font-size:11px}
+.brand small{color:rgba(239,246,255,.76);font-size:11px}
 .side-label,.eyebrow{font-size:10px;letter-spacing:1.5px;font-weight:700;color:#8fa3ba}
-.side-label{padding:0 12px 12px}
+.side-label{padding:0 12px 12px;color:rgba(239,246,255,.72)}
 nav{display:grid;gap:5px}
-.nav-item{border:0;background:transparent;color:#b5c7db;text-align:left;display:flex;align-items:center;gap:12px;padding:12px;border-radius:8px;transition:.2s}
-.nav-item:hover,.nav-item.active{background:#203b5d;color:#fff}
-.nav-item.active{box-shadow:inset 3px 0 #5d91f5}
+.nav-item{border:0;background:transparent;color:rgba(245,248,255,.82);text-align:left;display:flex;align-items:center;gap:12px;padding:12px;border-radius:8px;transition:.2s}
+.nav-item:hover,.nav-item.active{background:rgba(255,255,255,.16);color:#fff}
+.nav-item.active{box-shadow:inset 3px 0 #ffd45c,0 7px 18px rgba(23,41,128,.12)}
 .sidebar-bottom{margin-top:auto;display:grid;gap:16px}
-.sync-mini{border-top:1px solid #2a4666;padding:18px 10px 4px;color:#a8bfd8;font-size:11px}
-.sync-mini strong{display:block;color:#dce8f5;font-size:12px;margin-top:5px}
-.live-dot{width:7px;height:7px;border-radius:50%;background:#28c98b;display:inline-block;margin-right:7px}
+.sync-mini{border-top:1px solid rgba(255,255,255,.2);padding:18px 10px 4px;color:rgba(239,246,255,.78);font-size:11px}
+.sync-mini strong{display:block;color:#fff;font-size:12px;margin-top:5px}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#6af0af;display:inline-block;margin-right:7px}
 
 .main{flex:1;min-width:0}
 .topbar{height:78px;background:var(--topbar);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 42px}

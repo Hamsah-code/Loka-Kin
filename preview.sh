@@ -10,6 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+PREVIEW_PORT="${PREVIEW_PORT:-3000}"
 cd "$ROOT"
 
 # --- Backend: virtualenv + dependensi ---------------------------------------
@@ -34,6 +35,9 @@ BACKEND_PID=$!
 cleanup() { kill "$BACKEND_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-# --- Dashboard (http://0.0.0.0:3000, /api diproksi ke backend) --------------
+# --- Dashboard (/api diproksi ke backend) -----------------------------------
+# HMR harus memakai origin HTTPS preview, bukan port 0. Port PREVIEW_PORT
+# dapat dinaikkan untuk menghindari cache/runtime lama pada tab preview yang usang.
 cd frontend
-HOST=0.0.0.0 PORT=3000 BROWSER=none WDS_SOCKET_PORT=0 DANGEROUSLY_DISABLE_HOST_CHECK=true yarn start
+unset WDS_SOCKET_PORT
+HOST=0.0.0.0 PORT="$PREVIEW_PORT" BROWSER=none DANGEROUSLY_DISABLE_HOST_CHECK=true yarn start
