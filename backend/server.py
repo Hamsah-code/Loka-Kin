@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 import hashlib, json, os, tempfile, uuid, asyncio
 
 from db import create_database
+from csv_import import extract_rows as extract_csv_rows
 from pdf_import import extract_rows
 
 ROOT_DIR = Path(__file__).parent
@@ -577,6 +578,67 @@ async def reset_roster():
         "total_staff": await db.staff.count_documents({}),
         "active_staff": await db.staff.count_documents({"active": True}),
     }
+
+
+@api.post("/staff/parse-csv")
+async def parse_staff_csv(file: UploadFile = File(...)):
+    """Baca berkas CSV daftar staf dan kembalikan barisnya (tanpa menyimpan)."""
+    filename = (file.filename or "").lower()
+    if not (filename.endswith(".csv") or filename.endswith(".txt")):
+        raise HTTPException(400, "Berkas harus berformat CSV")
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(400, "Berkas CSV kosong")
+    tmp_path = Path(tempfile.gettempdir()) / f"loka-kin-{uuid.uuid4().hex}.csv"
+    tmp_path.write_bytes(payload)
+    try:
+        result = extract_csv_rows(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(400, f"CSV tidak dapat dibaca: {exc}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return {"filename": file.filename, **result}
+
+
+@api.post("/staff/import-csv")
+async def import_staff_csv(
+    file: UploadFile = File(...),
+    mode: str = Form("replace"),
+    source: str = Form("impor CSV"),
+):
+    """Baca CSV daftar staf lalu langsung menyinkronkan seluruh staf ke database."""
+    if mode not in {"replace", "merge"}:
+        raise HTTPException(400, "Mode impor harus 'replace' atau 'merge'")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(400, "Berkas CSV kosong")
+    tmp_path = Path(tempfile.gettempdir()) / f"loka-kin-{uuid.uuid4().hex}.csv"
+    tmp_path.write_bytes(payload)
+    try:
+        parsed = extract_csv_rows(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(400, f"CSV tidak dapat dibaca: {exc}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    rows = [
+        StaffImportRow(name=row["name"], bagian=row.get("bagian", ""), nip=row.get("nip", ""))
+        for row in parsed["rows"]
+    ]
+    result = await import_staff(
+        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor CSV"))
+    )
+    result["parsed_rows"] = parsed["count"]
+    result["with_nip"] = parsed["with_nip"]
+    result["delimiter"] = parsed["delimiter"]
+    result["warnings"] = parsed["warnings"]
+    return result
 
 
 @api.put("/staff/{staff_id}", response_model=Staff)

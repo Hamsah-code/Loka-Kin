@@ -213,6 +213,155 @@ def test_staff_import_rejects_invalid_mode(client):
     assert r.status_code == 400
 
 
+def _csv_bytes(tmp_path, name, content):
+    path = tmp_path / f"{name}-{uuid.uuid4().hex[:6]}.csv"
+    path.write_text(content, encoding="utf-8")
+    return path.read_bytes()
+
+
+def test_parse_csv_with_header_and_quoted_names(client, tmp_path):
+    payload = _csv_bytes(
+        tmp_path,
+        "daftar-staf",
+        'No,Nama,NIP,NIK,Keterangan\n'
+        '1,"Edwin, S.Sos",198501012010011001,,Penyuluh Sosial\n'
+        '2,"Nurma Fitria, S.IP, M.IKom",,1600000000000002,Kepala Bagian Umum\n',
+    )
+    r = client.post(
+        f"{BASE_URL}/api/staff/parse-csv",
+        headers={"Content-Type": None},
+        files={"file": ("DAFTAR STAF.csv", payload, "text/csv")},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 2
+    assert body["with_nip"] == 2
+    assert body["delimiter"] == "koma"
+    rows = {row["name"]: row for row in body["rows"]}
+    assert rows["Edwin, S.Sos"]["nip"] == "198501012010011001"
+    assert rows["Edwin, S.Sos"]["bagian"] == "Penyuluh Sosial"
+    assert rows["Nurma Fitria, S.IP, M.IKom"]["nip"] == "1600000000000002"
+    assert rows["Nurma Fitria, S.IP, M.IKom"]["bagian"] == "Kepala Bagian Umum"
+
+
+def test_parse_csv_excel_style_semicolon_and_dotted_nip(client, tmp_path):
+    """Ekspor Excel Indonesia: pemisah titik-koma, judul tabel di baris pertama."""
+    payload = _csv_bytes(
+        tmp_path,
+        "daftar-staf-excel",
+        "DAFTAR STAF LOKA REHABILITASI NARKOTIKA KALIANDA\n"
+        "No;Nama Staf;NIP/NIK;Jabatan\n"
+        "1;Saiful Bahri, A.Md.Kep;1985.0101.2010.0110.04;Perawat\n"
+        "2;Okta Delvianita, AMKL, SE.;1600000000000006;Bendahara\n",
+    )
+    r = client.post(
+        f"{BASE_URL}/api/staff/parse-csv",
+        headers={"Content-Type": None},
+        files={"file": ("DAFTAR STAF.csv", payload, "text/csv")},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["delimiter"] == "titik-koma"
+    rows = {row["name"]: row for row in body["rows"]}
+    assert rows["Saiful Bahri, A.Md.Kep"]["nip"] == "198501012010011004", "titik pada NIP harus dibersihkan"
+    assert rows["Saiful Bahri, A.Md.Kep"]["bagian"] == "Perawat"
+    assert rows["Okta Delvianita, AMKL, SE."]["nip"] == "1600000000000006"
+
+
+def test_parse_csv_tab_separated_without_header(client, tmp_path):
+    payload = _csv_bytes(
+        tmp_path,
+        "daftar-staf-tab",
+        "Ns. Hamsah Prihadi Istianto, S.Kep\t197905202005011004\tClinical Supervisor\n"
+        "Yulina Destiani, A.Md.Kep\t1600000000000019\tPerawat\n",
+    )
+    r = client.post(
+        f"{BASE_URL}/api/staff/parse-csv",
+        headers={"Content-Type": None},
+        files={"file": ("daftar.csv", payload, "text/csv")},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["delimiter"] == "tab"
+    rows = {row["name"]: row for row in body["rows"]}
+    assert rows["Ns. Hamsah Prihadi Istianto, S.Kep"]["nip"] == "197905202005011004"
+    assert rows["Ns. Hamsah Prihadi Istianto, S.Kep"]["bagian"] == "Clinical Supervisor"
+    assert rows["Yulina Destiani, A.Md.Kep"]["bagian"] == "Perawat"
+
+
+def test_parse_csv_without_nip_column_still_lists_names(client, tmp_path):
+    payload = _csv_bytes(tmp_path, "nama-saja", "Nama\nEdwin, S.Sos\ndr. Heni Purwanti\n")
+    r = client.post(
+        f"{BASE_URL}/api/staff/parse-csv",
+        headers={"Content-Type": None},
+        files={"file": ("nama.csv", payload, "text/csv")},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 2
+    assert body["with_nip"] == 0
+    assert body["warnings"], "harus ada peringatan bahwa NIP/NIK belum ada"
+    names = [row["name"] for row in body["rows"]]
+    assert "Edwin, S.Sos" in names and "dr. Heni Purwanti" in names
+
+
+def test_parse_csv_rejects_unreadable_file(client, tmp_path):
+    payload = _csv_bytes(tmp_path, "kosong", "   \n\n")
+    r = client.post(
+        f"{BASE_URL}/api/staff/parse-csv",
+        headers={"Content-Type": None},
+        files={"file": ("kosong.csv", payload, "text/csv")},
+        timeout=20,
+    )
+    assert r.status_code == 400
+
+
+def test_import_csv_fills_nip_for_all_staff(client, tmp_path):
+    """Unggah CSV mengganti seluruh daftar staf dan mengisi kolom NIP/NIK."""
+    snapshot = client.get(f"{BASE_URL}/api/staff/roster", timeout=20).json()
+    payload = _csv_bytes(
+        tmp_path,
+        "data-staf",
+        "No,Nama,NIP,NIK,Keterangan\n"
+        "1,Uji Csv Satu, S.Kep,198001012006041001,,Perawat Uji\n"
+        "2,Uji Csv Dua, A.Md,,1600000000000123,Administrasi Uji\n",
+    )
+    r = client.post(
+        f"{BASE_URL}/api/staff/import-csv",
+        headers={"Content-Type": None},
+        files={"file": ("DATA STAF.csv", payload, "text/csv")},
+        data={"mode": "replace", "source": "pytest csv"},
+        timeout=30,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["imported"] == 2
+    assert body["with_nip"] == 2
+    assert body["delimiter"] == "koma"
+
+    try:
+        staff = client.get(f"{BASE_URL}/api/staff?include_inactive=false", timeout=20).json()
+        by_name = {row["name"]: row for row in staff}
+        assert len(staff) == 2
+        assert by_name["Uji Csv Satu, S.Kep"]["nip"] == "198001012006041001"
+        assert by_name["Uji Csv Satu, S.Kep"]["id_type"] == "NIP"
+        assert by_name["Uji Csv Dua, A.Md"]["nip"] == "1600000000000123"
+        assert by_name["Uji Csv Dua, A.Md"]["id_type"] == "NIK"
+        assert by_name["Uji Csv Dua, A.Md"]["keterangan"] == "Administrasi Uji"
+    finally:
+        restore = client.post(
+            f"{BASE_URL}/api/staff/import",
+            json={"mode": "replace", "source": snapshot["source"], "rows": snapshot["rows"]},
+            timeout=30,
+        )
+        assert restore.status_code == 200
+        assert restore.json()["total_roster"] == snapshot["count"]
+
+
 def _pdf_bytes(builder, tmp_path, *args):
     path = tmp_path / f"staf-{uuid.uuid4().hex[:6]}.pdf"
     builder(path, *args)

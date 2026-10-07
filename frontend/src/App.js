@@ -902,38 +902,59 @@ function StaffModal({ staff, onClose, onSave }) {
   );
 }
 
-// Tempel daftar staf dari PDF/Excel: satu baris per staf dengan pemisah "|", tab, atau ";".
+// Tempel daftar staf (hasil salin dari PDF/Excel/CSV). Setiap baris menjadi satu staf.
+// NIP/NIK dikenali dari 16/18 digit; teks sebelum nomor = nama, setelahnya = keterangan.
 const parseStaffPaste = (text) => {
+  const cleanField = (value) => String(value || "")
+    .replace(/^[-\u2013\u2022\d.)\s]*[,;:.\-\s]*/, "")   // penomoran & pemisah di depan
+    .replace(/[,;:.\-\s"\u2019'\u201d]+$/, "")            // pemisah & tanda kutip di belakang
+    .replace(/^["\u201c'\u2018]+/, "")                     // tanda kutip di depan
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const withLetters = (value) => /[A-Za-z]/.test(value);
+  const firstMeaningful = (parts) => parts.map(cleanField).find((part) => part && withLetters(part)) || "";
+
   const rows = [];
   String(text || "").split(/\r?\n/).forEach((line) => {
     const raw = line.trim();
     if (!raw) return;
-    const parts = raw.split(/\s*[|\t;]\s*/).map((p) => p.trim()).filter((p) => p !== "");
-    if (parts.length === 0) return;
-    const digits = (value) => String(value || "").replace(/\D/g, "");
+    if (/^daftar\s+(hadir\s+)?staf/i.test(raw)) return;        // judul dokumen
+    if (/nama/i.test(raw) && /(nip|nik)/i.test(raw)) return;    // baris judul kolom
+
     let nip = "";
+    let nama = "";
     let bagian = "";
-    let name = parts[0];
-    // NIP/NIK dikenali dari kolom berisi 16/18 digit (boleh bergabung dengan nama).
-    parts.forEach((part, idx) => {
-      const found = part.match(/\d{16,18}/);
-      if (found && !nip) {
-        nip = found[0];
-        const withoutNip = part.replace(found[0], "").replace(/[|\t;:-]+/g, " ").trim();
-        if (idx === 0 && withoutNip) name = withoutNip;
-        return;
+
+    const idMatch = raw.match(/\d[\d.,\s]{14,22}\d/);
+    if (idMatch) {
+      const digits = idMatch[0].replace(/\D/g, "");
+      if (digits.length >= 16 && digits.length <= 18) {
+        nip = digits;
+        const splitParts = (value) => value
+          .split(/\s*[|\t;]\s*/)
+          .map(cleanField)
+          .filter((part) => part && withLetters(part));
+        const beforeParts = splitParts(raw.slice(0, idMatch.index));
+        const afterParts = splitParts(raw.slice(idMatch.index + idMatch[0].length));
+        nama = beforeParts[0] || "";
+        bagian = beforeParts[1] || afterParts[0] || "";
       }
-      if (idx > 0 && !bagian && !/\d{16,18}/.test(part)) bagian = part;
-    });
-    const inlineNip = name.match(/\d{16,18}/);
-    if (inlineNip && !nip) {
-      nip = inlineNip[0];
-      name = name.replace(inlineNip[0], "").trim();
     }
-    name = name.replace(/[|\t;]+/g, " ").replace(/\s{2,}/g, " ").replace(/^[-–•\d.\s]+/, "").trim();
-    if (!name) return;
-    if (digits(nip).length && ![16, 18].includes(digits(nip).length)) nip = digits(nip);
-    rows.push({ name, bagian, nip });
+
+    if (!nama) {
+      const parts = raw.split(/\s*[|\t;]\s*/);
+      if (parts.length > 1) {
+        nama = firstMeaningful(parts);
+        const rest = parts.slice(parts.findIndex((p) => cleanField(p) === nama) + 1);
+        bagian = firstMeaningful(rest);
+      } else {
+        nama = cleanField(raw);
+      }
+    }
+
+    if (!nama || !withLetters(nama)) return;
+    if (bagian && !withLetters(bagian)) bagian = "";
+    rows.push({ name: nama, bagian, nip });
   });
   return rows;
 };
@@ -941,20 +962,23 @@ const parseStaffPaste = (text) => {
 function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState("replace");
-  const [pdfInfo, setPdfInfo] = useState(null);   // ringkasan hasil pembacaan PDF
-  const [pdfRows, setPdfRows] = useState([]);     // baris hasil pembacaan PDF
+  const [fileInfo, setFileInfo] = useState(null);  // ringkasan hasil pembacaan berkas
+  const [fileRows, setFileRows] = useState([]);    // baris hasil pembacaan berkas
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const fileRef = useRef(null);
 
   const pastedRows = useMemo(() => parseStaffPaste(text), [text]);
-  const rows = pdfRows.length > 0 ? pdfRows : pastedRows;
+  const rows = fileRows.length > 0 ? fileRows : pastedRows;
   const withNip = rows.filter((r) => r.nip).length;
 
-  const readPdf = async (file) => {
+  const readFile = async (file) => {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      toast.error("Berkas harus berformat PDF");
+    const name = file.name.toLowerCase();
+    const isPdf = name.endsWith(".pdf");
+    const isCsv = name.endsWith(".csv") || name.endsWith(".txt");
+    if (!isPdf && !isCsv) {
+      toast.error("Berkas harus berformat PDF atau CSV");
       return;
     }
     setBusy(true);
@@ -962,18 +986,20 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await axios.post(`${API}/staff/parse-pdf`, form, {
+      const res = await axios.post(`${API}/staff/${isPdf ? "parse-pdf" : "parse-csv"}`, form, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (e) => {
           if (e.total) setProgress(`Mengunggah ${Math.round((e.loaded / e.total) * 100)}%…`);
         },
       });
-      setPdfRows(res.data.rows || []);
-      setPdfInfo({
+      setFileRows(res.data.rows || []);
+      setFileInfo({
         filename: res.data.filename,
+        kind: isPdf ? "PDF" : "CSV",
         count: res.data.count,
         with_nip: res.data.with_nip,
         pages: res.data.pages,
+        delimiter: res.data.delimiter,
         warnings: res.data.warnings || [],
       });
       setText((res.data.raw_text || "").slice(0, 4000));
@@ -981,9 +1007,9 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
       (res.data.warnings || []).forEach((w) => toast.warning(w));
     } catch (err) {
       const detail = err.response?.data?.detail;
-      setPdfInfo(null);
-      setPdfRows([]);
-      toast.error(Array.isArray(detail) ? detail[0]?.msg : detail || "Gagal membaca PDF");
+      setFileInfo(null);
+      setFileRows([]);
+      toast.error(Array.isArray(detail) ? detail[0]?.msg : detail || "Gagal membaca berkas");
     } finally {
       setBusy(false);
       setProgress("");
@@ -991,7 +1017,7 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
     }
   };
 
-  const resetPdf = () => { setPdfInfo(null); setPdfRows([]); setText(""); };
+  const resetFile = () => { setFileInfo(null); setFileRows([]); setText(""); };
 
   return (
     <div className="modal-backdrop" data-testid="staff-import-modal">
@@ -999,39 +1025,44 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
         <div className="modal-head">
           <div>
             <span className="eyebrow">IMPOR DAFTAR STAF</span>
-            <h2>Perbarui seluruh staf dari berkas PDF</h2>
+            <h2>Perbarui seluruh staf dari berkas PDF atau CSV</h2>
           </div>
           <button className="icon-button" data-testid="staff-import-close" onClick={onClose}><X size={18} /></button>
         </div>
         <p className="modal-subtitle">
-          Unggah berkas <b>DATA STAF</b> (.pdf) — kolom nama, NIP/NIK, dan keterangan jabatan dibaca otomatis,
-          lalu seluruh daftar staf diperbarui sekaligus. Bisa juga dengan menempelkan teksnya pada kolom di bawah.
+          Unggah berkas <b>DATA STAF</b> (.pdf atau .csv) — kolom nama, NIP/NIK, dan keterangan jabatan dibaca otomatis,
+          lalu seluruh daftar staf diperbarui sekaligus. Pemisah koma, titik-koma (Excel), tab, atau pipa dikenali otomatis.
+          Bisa juga dengan menempelkan teksnya pada kolom di bawah.
         </p>
 
         <label className="pdf-drop" data-testid="staff-import-drop">
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,text/csv,.csv,.txt"
             data-testid="staff-import-file"
-            onChange={(e) => readPdf(e.target.files?.[0])}
+            onChange={(e) => readFile(e.target.files?.[0])}
           />
           <FileText size={22} />
           <span>
-            <strong>{busy ? progress || "Memproses…" : "Pilih berkas PDF DATA STAF"}</strong>
+            <strong>{busy ? progress || "Memproses…" : "Pilih berkas DATA STAF (PDF atau CSV)"}</strong>
             <small>Hasil pembacaan ditampilkan lebih dulu untuk diperiksa sebelum disimpan.</small>
           </span>
         </label>
 
-        {pdfInfo && (
+        {fileInfo && (
           <div className="pdf-result" data-testid="staff-import-pdf-result">
             <div className="pdf-result-head">
-              <span><b>{pdfInfo.count}</b> staf terbaca · <b>{pdfInfo.with_nip}</b> memiliki NIP/NIK · {pdfInfo.pages} halaman</span>
-              <button className="text-btn" onClick={resetPdf}><X size={14} /> Bersihkan</button>
+              <span>
+                <b>{fileInfo.count}</b> staf terbaca dari {fileInfo.kind} · <b>{fileInfo.with_nip}</b> memiliki NIP/NIK
+                {fileInfo.pages ? ` · ${fileInfo.pages} halaman` : ""}
+                {fileInfo.delimiter ? ` · pemisah: ${fileInfo.delimiter}` : ""}
+              </span>
+              <button className="text-btn" onClick={resetFile}><X size={14} /> Bersihkan</button>
             </div>
             <div className="import-preview">
               <div className="import-preview-head"><span>Nama</span><span>NIP/NIK</span><span>Keterangan</span></div>
-              {pdfRows.slice(0, 8).map((row, idx) => (
+              {fileRows.slice(0, 8).map((row, idx) => (
                 <div className="import-preview-row" key={`${row.name}-${idx}`}>
                   <span>{row.name}</span>
                   <span>
@@ -1041,8 +1072,8 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
                   <span>{row.bagian || "—"}</span>
                 </div>
               ))}
-              {pdfRows.length > 8 && (
-                <div className="import-preview-more">+ {pdfRows.length - 8} staf lainnya akan ikut diperbarui</div>
+              {fileRows.length > 8 && (
+                <div className="import-preview-more">+ {fileRows.length - 8} staf lainnya akan ikut diperbarui</div>
               )}
             </div>
           </div>
@@ -1050,12 +1081,12 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
 
         <div className="form-grid">
           <label className="full">
-            {pdfRows.length > 0 ? "Teks mentah PDF (untuk pemeriksaan)" : "Atau tempel daftar staf"}
+            {fileRows.length > 0 ? "Teks mentah berkas (untuk pemeriksaan)" : "Atau tempel daftar staf"}
             <textarea
               data-testid="staff-import-textarea"
               className="import-textarea"
               value={text}
-              onChange={(e) => { setText(e.target.value); if (pdfRows.length) setPdfRows([]); }}
+              onChange={(e) => { setText(e.target.value); if (fileRows.length) setFileRows([]); }}
               placeholder={"Edwin, S.Sos | Penyuluh Sosial | 198501012010011001\nNurma Fitria, S.IP, M.IKom | Kepala Bagian Umum | 1600000000000002"}
             />
           </label>
