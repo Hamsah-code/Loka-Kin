@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle, ArrowRight, Award, BarChart3, Building2, Calendar, Camera, CheckCircle2, ClipboardList, Clock, Download, FileSpreadsheet, FileText,
-  HeartHandshake, History, Layers, LayoutDashboard, Menu, Moon, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
+  HeartHandshake, History, Layers, LayoutDashboard, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import "@/App.css";
@@ -23,6 +23,18 @@ const currentDate = () =>
 
 const pad = (n) => String(n).padStart(2, "0");
 const toDateInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+// NIP (PNS) umumnya 18 digit, NIK (non-PNS) 16 digit.
+const inferIdType = (nip) => {
+  const digits = String(nip || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 18) return "NIP";
+  if (digits.length === 16) return "NIK";
+  return digits.length > 16 ? "NIP" : "NIK";
+};
+const staffIdLabel = (person) => person?.id_type || inferIdType(person?.nip) || "NIP/NIK";
+const staffIdValue = (person) => person?.nip ? person.nip : "—";
+const staffKeterangan = (person) => person?.keterangan || person?.position || "—";
 
 const toDateTimeInput = (d = new Date()) => {
   if (!d) return "";
@@ -841,22 +853,239 @@ function TaskModal({ task, staff, onClose, onSave }) {
   );
 }
 
-function StaffModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ name: "", department: departments[0] });
+function StaffModal({ staff, onClose, onSave }) {
+  const isEdit = Boolean(staff?.id);
+  const [form, setForm] = useState({
+    id: staff?.id || "",
+    name: staff?.name || "",
+    department: staff?.department || departments[0],
+    nip: staff?.nip || "",
+    id_type: staff?.id_type || "",
+    keterangan: staff?.keterangan || "",
+    position: staff?.position || "",
+  });
+  const effectiveIdType = form.id_type || inferIdType(form.nip);
+  const submit = () => {
+    if (!form.name.trim()) {
+      toast.error("Nama staf wajib diisi");
+      return;
+    }
+    onSave({ ...form, name: form.name.trim(), id_type: form.id_type || inferIdType(form.nip) });
+  };
   return (
     <div className="modal-backdrop" data-testid="staff-modal">
       <div className="modal">
         <div className="modal-head">
-          <div><span className="eyebrow">ADMINISTRASI TIM</span><h2>Tambah staf</h2></div>
+          <div>
+            <span className="eyebrow">ADMINISTRASI TIM</span>
+            <h2>{isEdit ? "Ubah data staf" : "Tambah staf"}</h2>
+          </div>
           <button className="icon-button" data-testid="staff-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="form-grid">
           <label className="full">Nama lengkap<input autoFocus data-testid="staff-name-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Contoh: Sari Wulandari" /></label>
+          <label>NIP / NIK<input data-testid="staff-nip-input" value={form.nip} inputMode="numeric" onChange={(e) => setForm({ ...form, nip: e.target.value.replace(/[^\d.\s-]/g, "") })} placeholder="16 digit (NIK) atau 18 digit (NIP)" /></label>
+          <label>Jenis nomor<select data-testid="staff-idtype-select" value={form.id_type} onChange={(e) => setForm({ ...form, id_type: e.target.value })}>
+            <option value="">Otomatis{effectiveIdType ? ` (${effectiveIdType})` : ""}</option>
+            <option value="NIP">NIP</option>
+            <option value="NIK">NIK</option>
+          </select></label>
+          <label className="full">Keterangan (jabatan / instalasi / bagian)<input data-testid="staff-keterangan-input" value={form.keterangan} onChange={(e) => setForm({ ...form, keterangan: e.target.value })} placeholder="Contoh: Perawat Pelaksana · Instalasi Detoksifikasi" /></label>
           <label className="full">Departemen<select data-testid="staff-department-select" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>{departments.map((d) => <option key={d}>{d}</option>)}</select></label>
         </div>
         <div className="modal-actions">
           <button className="secondary-btn" data-testid="staff-cancel-button" onClick={onClose}>Batal</button>
-          <button className="primary-btn" data-testid="staff-save-button" onClick={() => form.name.trim() ? onSave(form) : toast.error("Nama staf wajib diisi")}>Simpan staf</button>
+          <button className="primary-btn" data-testid="staff-save-button" onClick={submit}>{isEdit ? "Simpan perubahan" : "Simpan staf"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tempel daftar staf dari PDF/Excel: satu baris per staf dengan pemisah "|", tab, atau ";".
+const parseStaffPaste = (text) => {
+  const rows = [];
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    const raw = line.trim();
+    if (!raw) return;
+    const parts = raw.split(/\s*[|\t;]\s*/).map((p) => p.trim()).filter((p) => p !== "");
+    if (parts.length === 0) return;
+    const digits = (value) => String(value || "").replace(/\D/g, "");
+    let nip = "";
+    let bagian = "";
+    let name = parts[0];
+    // NIP/NIK dikenali dari kolom berisi 16/18 digit (boleh bergabung dengan nama).
+    parts.forEach((part, idx) => {
+      const found = part.match(/\d{16,18}/);
+      if (found && !nip) {
+        nip = found[0];
+        const withoutNip = part.replace(found[0], "").replace(/[|\t;:-]+/g, " ").trim();
+        if (idx === 0 && withoutNip) name = withoutNip;
+        return;
+      }
+      if (idx > 0 && !bagian && !/\d{16,18}/.test(part)) bagian = part;
+    });
+    const inlineNip = name.match(/\d{16,18}/);
+    if (inlineNip && !nip) {
+      nip = inlineNip[0];
+      name = name.replace(inlineNip[0], "").trim();
+    }
+    name = name.replace(/[|\t;]+/g, " ").replace(/\s{2,}/g, " ").replace(/^[-–•\d.\s]+/, "").trim();
+    if (!name) return;
+    if (digits(nip).length && ![16, 18].includes(digits(nip).length)) nip = digits(nip);
+    rows.push({ name, bagian, nip });
+  });
+  return rows;
+};
+
+function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
+  const [text, setText] = useState("");
+  const [mode, setMode] = useState("replace");
+  const [pdfInfo, setPdfInfo] = useState(null);   // ringkasan hasil pembacaan PDF
+  const [pdfRows, setPdfRows] = useState([]);     // baris hasil pembacaan PDF
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const fileRef = useRef(null);
+
+  const pastedRows = useMemo(() => parseStaffPaste(text), [text]);
+  const rows = pdfRows.length > 0 ? pdfRows : pastedRows;
+  const withNip = rows.filter((r) => r.nip).length;
+
+  const readPdf = async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Berkas harus berformat PDF");
+      return;
+    }
+    setBusy(true);
+    setProgress(`Membaca ${file.name}…`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await axios.post(`${API}/staff/parse-pdf`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (e) => {
+          if (e.total) setProgress(`Mengunggah ${Math.round((e.loaded / e.total) * 100)}%…`);
+        },
+      });
+      setPdfRows(res.data.rows || []);
+      setPdfInfo({
+        filename: res.data.filename,
+        count: res.data.count,
+        with_nip: res.data.with_nip,
+        pages: res.data.pages,
+        warnings: res.data.warnings || [],
+      });
+      setText((res.data.raw_text || "").slice(0, 4000));
+      toast.success(`${res.data.count} staf terbaca dari ${res.data.filename}`);
+      (res.data.warnings || []).forEach((w) => toast.warning(w));
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setPdfInfo(null);
+      setPdfRows([]);
+      toast.error(Array.isArray(detail) ? detail[0]?.msg : detail || "Gagal membaca PDF");
+    } finally {
+      setBusy(false);
+      setProgress("");
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const resetPdf = () => { setPdfInfo(null); setPdfRows([]); setText(""); };
+
+  return (
+    <div className="modal-backdrop" data-testid="staff-import-modal">
+      <div className="modal modal-wide">
+        <div className="modal-head">
+          <div>
+            <span className="eyebrow">IMPOR DAFTAR STAF</span>
+            <h2>Perbarui seluruh staf dari berkas PDF</h2>
+          </div>
+          <button className="icon-button" data-testid="staff-import-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <p className="modal-subtitle">
+          Unggah berkas <b>DATA STAF</b> (.pdf) — kolom nama, NIP/NIK, dan keterangan jabatan dibaca otomatis,
+          lalu seluruh daftar staf diperbarui sekaligus. Bisa juga dengan menempelkan teksnya pada kolom di bawah.
+        </p>
+
+        <label className="pdf-drop" data-testid="staff-import-drop">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            data-testid="staff-import-file"
+            onChange={(e) => readPdf(e.target.files?.[0])}
+          />
+          <FileText size={22} />
+          <span>
+            <strong>{busy ? progress || "Memproses…" : "Pilih berkas PDF DATA STAF"}</strong>
+            <small>Hasil pembacaan ditampilkan lebih dulu untuk diperiksa sebelum disimpan.</small>
+          </span>
+        </label>
+
+        {pdfInfo && (
+          <div className="pdf-result" data-testid="staff-import-pdf-result">
+            <div className="pdf-result-head">
+              <span><b>{pdfInfo.count}</b> staf terbaca · <b>{pdfInfo.with_nip}</b> memiliki NIP/NIK · {pdfInfo.pages} halaman</span>
+              <button className="text-btn" onClick={resetPdf}><X size={14} /> Bersihkan</button>
+            </div>
+            <div className="import-preview">
+              <div className="import-preview-head"><span>Nama</span><span>NIP/NIK</span><span>Keterangan</span></div>
+              {pdfRows.slice(0, 8).map((row, idx) => (
+                <div className="import-preview-row" key={`${row.name}-${idx}`}>
+                  <span>{row.name}</span>
+                  <span>
+                    <span className={`id-badge ${(inferIdType(row.nip) || "unknown").toLowerCase()}`}>{inferIdType(row.nip) || "—"}</span>{" "}
+                    {row.nip || "—"}
+                  </span>
+                  <span>{row.bagian || "—"}</span>
+                </div>
+              ))}
+              {pdfRows.length > 8 && (
+                <div className="import-preview-more">+ {pdfRows.length - 8} staf lainnya akan ikut diperbarui</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="form-grid">
+          <label className="full">
+            {pdfRows.length > 0 ? "Teks mentah PDF (untuk pemeriksaan)" : "Atau tempel daftar staf"}
+            <textarea
+              data-testid="staff-import-textarea"
+              className="import-textarea"
+              value={text}
+              onChange={(e) => { setText(e.target.value); if (pdfRows.length) setPdfRows([]); }}
+              placeholder={"Edwin, S.Sos | Penyuluh Sosial | 198501012010011001\nNurma Fitria, S.IP, M.IKom | Kepala Bagian Umum | 1600000000000002"}
+            />
+          </label>
+          <label className="full">Cara memasukkan data
+            <select data-testid="staff-import-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="replace">Ganti seluruh daftar staf</option>
+              <option value="merge">Tambahkan ke daftar yang ada</option>
+            </select>
+          </label>
+        </div>
+        <div className="import-summary" data-testid="staff-import-summary">
+          <span><b>{rows.length}</b> staf siap diperbarui</span>
+          <span><b>{withNip}</b> memiliki NIP/NIK</span>
+          <span><b>{rows.length - withNip}</b> tanpa NIP/NIK</span>
+          {mode === "replace" && <span className="warn">Daftar lama akan digantikan seluruhnya</span>}
+        </div>
+        <div className="modal-actions">
+          <button className="text-btn" data-testid="staff-import-reset" disabled={busy} onClick={onResetRoster}>
+            Kembalikan daftar bawaan aplikasi
+          </button>
+          <span className="spacer" />
+          <button className="secondary-btn" data-testid="staff-import-cancel" onClick={onClose}>Batal</button>
+          <button
+            className="primary-btn"
+            disabled={busy}
+            data-testid="staff-import-save"
+            onClick={() => rows.length ? onConfirm({ rows, mode }) : toast.error("Belum ada data staf yang bisa diimpor")}
+          >
+            <Download size={16} /> Perbarui {rows.length || ""} staf
+          </button>
         </div>
       </div>
     </div>
@@ -1124,32 +1353,83 @@ function Overview({ analytics, tasks, staffCount, onGo, onCreate }) {
   );
 }
 
-function StaffPage({ staff, tasks, onAdd, onDelete }) {
+function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport }) {
+  const [query, setQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const needle = query.trim().toLowerCase();
+  const archivedCount = staff.filter((s) => s.active === false).length;
+  const baseStaff = showInactive ? staff : staff.filter((s) => s.active !== false);
+  const visibleStaff = needle
+    ? baseStaff.filter((s) =>
+        [s.name, s.nip, s.keterangan, s.department, s.id_type]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(needle)))
+    : baseStaff;
   return (
     <>
       <PageIntro
         title="Daftar staf"
-        desc="Kelola anggota tim dan lihat ringkasan laporan mereka."
-        action={<button className="primary-btn" data-testid="add-staff-button" onClick={onAdd}><Plus size={17} /> Tambah staf</button>}
+        desc="Kelola anggota tim, nomor identitas (NIP/NIK), keterangan jabatan, dan ringkasan laporan mereka."
+        action={
+          <div className="page-actions">
+            <button className="secondary-btn" data-testid="import-staff-button" onClick={onImport}><Download size={16} /> Impor daftar</button>
+            <button className="primary-btn" data-testid="add-staff-button" onClick={onAdd}><Plus size={17} /> Tambah staf</button>
+          </div>
+        }
       />
-      <div className="surface staff-table">
-        <div className="table-head">
-          <strong>Nama staf</strong><strong>Departemen</strong><strong>Laporan</strong><strong>Status</strong><strong>Aksi</strong>
+      <div className="staff-toolbar">
+        <div className="search">
+          <Search size={16} />
+          <input
+            data-testid="staff-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari nama, NIP/NIK, atau keterangan jabatan…"
+          />
         </div>
-        {staff.map((s) => (
-          <div className="staff-row" data-testid={`staff-row-${s.id}`} key={s.id}>
+        <span className="result-count" data-testid="staff-count">
+          {visibleStaff.length} dari {baseStaff.length} staf aktif-terdaftar
+        </span>
+        {archivedCount > 0 && (
+          <label className="inactive-toggle" data-testid="staff-show-inactive">
+            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+            Tampilkan {archivedCount} staf dari daftar lama
+          </label>
+        )}
+      </div>
+      <div className="surface staff-table">
+        <div className="table-head staff-grid">
+          <strong>Nama staf</strong><strong>NIP / NIK</strong><strong>Keterangan</strong><strong>Departemen</strong><strong>Laporan</strong><strong>Status</strong><strong>Aksi</strong>
+        </div>
+        {visibleStaff.map((s) => (
+          <div className="staff-row staff-grid" data-testid={`staff-row-${s.id}`} key={s.id}>
             <div className="staff-name">
               <Avatar name={s.name} />
               <span><strong>{s.name}</strong><small>ID · {s.id.replace("staff-", "LK-")}</small></span>
             </div>
+            <div className="staff-id" data-testid={`staff-id-${s.id}`}>
+              <span className={`id-badge ${s.id_type ? s.id_type.toLowerCase() : "unknown"}`}>{staffIdLabel(s)}</span>
+              <b>{staffIdValue(s)}</b>
+            </div>
+            <span className="staff-note" title={staffKeterangan(s)}>{staffKeterangan(s)}</span>
             <span>{s.department}</span>
             <b>{tasks.filter((t) => t.staff_id === s.id).length} laporan</b>
-            <span className="active-pill"><i /> Aktif</span>
-            <button className="delete-staff" data-testid={`delete-staff-${s.id}`} onClick={() => onDelete(s)}>
-              <Trash2 size={15} /> Hapus
-            </button>
+            {s.active === false
+              ? <span className="inactive-pill" title={s.archive_reason || "Tidak ada pada daftar staf terbaru"}><i /> Nonaktif</span>
+              : <span className="active-pill"><i /> Aktif</span>}
+            <div className="row-actions">
+              <button className="edit-staff" data-testid={`edit-staff-${s.id}`} onClick={() => onEdit(s)}>
+                <Pencil size={15} /> Ubah
+              </button>
+              <button className="delete-staff" data-testid={`delete-staff-${s.id}`} onClick={() => onDelete(s)}>
+                <Trash2 size={15} /> Hapus
+              </button>
+            </div>
           </div>
         ))}
+        {visibleStaff.length === 0 && (
+          <div className="empty-state" data-testid="staff-empty">Tidak ada staf yang cocok dengan pencarian.</div>
+        )}
       </div>
     </>
   );
@@ -1440,6 +1720,7 @@ export default function App() {
     total_tasks: 0, completion_rate: 0, total_staff: 0,
   });
   const [modal, setModal] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [exportMode, setExportMode] = useState(null); // 'excel' | 'pdf' | null
   const [pdfPreview, setPdfPreview] = useState(null);
   const [transitionModal, setTransitionModal] = useState(null);
@@ -1506,11 +1787,56 @@ export default function App() {
       toast.error(Array.isArray(msg) ? "Lengkapi data tugas terlebih dahulu" : msg);
     }
   };
-  const addStaff = async (form) => {
+  const saveStaff = async (form) => {
+    const isEdit = Boolean(form.id);
+    const payload = {
+      name: form.name,
+      department: form.department,
+      nip: form.nip || "",
+      id_type: form.id_type || inferIdType(form.nip),
+      keterangan: form.keterangan || "",
+      position: form.position || "",
+    };
     try {
-      const res = await axios.post(`${API}/staff`, form);
-      setStaff((prev) => [...prev, res.data]); setModal(null); toast.success("Staf berhasil ditambahkan");
-    } catch { toast.error("Gagal menambahkan staf"); }
+      if (isEdit) {
+        const res = await axios.put(`${API}/staff/${form.id}`, payload);
+        setStaff((prev) => prev.map((s) => (s.id === form.id ? res.data : s)));
+        toast.success(`Data ${res.data.name} diperbarui`);
+      } else {
+        const res = await axios.post(`${API}/staff`, payload);
+        setStaff((prev) => [...prev, res.data]);
+        toast.success("Staf berhasil ditambahkan");
+      }
+      setModal(null);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg || "Periksa kembali data staf" : detail;
+      toast.error(msg || (isEdit ? "Gagal memperbarui data staf" : "Gagal menambahkan staf"));
+    }
+  };
+  const importStaff = async ({ rows, mode }) => {
+    try {
+      const res = await axios.post(`${API}/staff/import`, { rows, mode, source: "tempel daftar staf (PDF/Excel)" });
+      toast.success(
+        mode === "replace"
+          ? `Daftar staf diganti: ${res.data.imported} staf tersimpan`
+          : `Impor selesai: ${res.data.imported} staf ditambahkan`
+      );
+      setImportOpen(false);
+      await load();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(Array.isArray(detail) ? detail[0]?.msg || "Format impor tidak valid" : detail || "Gagal mengimpor daftar staf");
+    }
+  };
+  const resetRoster = async () => {
+    if (!window.confirm("Kembalikan daftar staf ke daftar bawaan aplikasi? Hasil impor akan dibatalkan.")) return;
+    try {
+      const res = await axios.delete(`${API}/staff/roster`);
+      toast.success(`Daftar bawaan dipulihkan: ${res.data.roster_count} staf`);
+      setImportOpen(false);
+      await load();
+    } catch { toast.error("Gagal memulihkan daftar bawaan"); }
   };
   const deleteStaff = async (person) => {
     if (!window.confirm(`Hapus staf ${person.name}?`)) return;
@@ -1646,7 +1972,8 @@ export default function App() {
         <div style="margin-bottom:14px;background:#f8fafc;padding:12px;border:1px solid #cbd5e1;border-radius:6px;">
           <table style="width:100%;font-size:11px;border-collapse:collapse;">
             <tr><td style="width:160px;font-weight:bold;">Staf Penanggung Jawab</td><td>: ${targetStaff.name}</td><td style="width:130px;font-weight:bold;">Periode</td><td>: ${periodTitle[period]} (${label})</td></tr>
-            <tr><td style="font-weight:bold;">Departemen</td><td>: ${targetStaff.department}</td><td style="font-weight:bold;">Capaian Kinerja</td><td>: Total ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})</td></tr>
+            <tr><td style="font-weight:bold;">${staffIdLabel(targetStaff)}</td><td>: ${staffIdValue(targetStaff)}</td><td style="font-weight:bold;">Capaian Kinerja</td><td>: Total ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})</td></tr>
+            <tr><td style="font-weight:bold;">Departemen</td><td>: ${targetStaff.department}</td><td style="font-weight:bold;">Keterangan</td><td>: ${staffKeterangan(targetStaff)}</td></tr>
           </table>
         </div>
         <table class="report-table">
@@ -1700,7 +2027,7 @@ export default function App() {
         return `
           <div style="margin-top:20px;">
             <div style="background:#f1f5f9;padding:8px 10px;font-weight:bold;font-size:12px;border:1px solid #cbd5e1;border-bottom:0;">
-              Staf: ${s.name} &nbsp;|&nbsp; Departemen: ${s.department} &nbsp;|&nbsp; ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})
+              Staf: ${s.name} &nbsp;|&nbsp; ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;|&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;|&nbsp; Departemen: ${s.department} &nbsp;|&nbsp; ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})
             </div>
             <table class="report-table">
               <tr>
@@ -1784,10 +2111,16 @@ export default function App() {
               <td style="font-weight:bold;color:#0f172a;">: ${periodTitle[period]} (${label})</td>
             </tr>
             <tr>
-              <td style="font-weight:bold;color:#475569;">Departemen</td>
-              <td style="color:#1e293b;">: ${targetStaff.department}</td>
+              <td style="font-weight:bold;color:#475569;">${staffIdLabel(targetStaff)}</td>
+              <td style="color:#1e293b;">: ${staffIdValue(targetStaff)}</td>
               <td style="font-weight:bold;color:#475569;">Pencapaian</td>
               <td style="color:#1e293b;">: ${stats.total} Tugas · Selesai: <b>${stats.finish}</b> (${stats.rate}%) · Doing: <b>${stats.doing}</b> · To Do: <b>${stats.todo}</b></td>
+            </tr>
+            <tr>
+              <td style="font-weight:bold;color:#475569;">Departemen</td>
+              <td style="color:#1e293b;">: ${targetStaff.department}</td>
+              <td style="font-weight:bold;color:#475569;">Keterangan</td>
+              <td style="color:#1e293b;">: ${staffKeterangan(targetStaff)}</td>
             </tr>
           </table>
         </div>
@@ -1863,6 +2196,9 @@ export default function App() {
             <div class="staff-banner">
               <div>
                 <strong>${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
+                <div style="font-weight:normal;font-size:10px;color:#475569;margin-top:2px;">
+                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}
+                </div>
               </div>
               <div style="font-size:10px;font-weight:600;color:#1e3d75;">
                 ${stats.total} Tugas · Selesai: ${stats.finish} (${stats.rate}%) · Doing: ${stats.doing} · To Do: ${stats.todo}
@@ -2056,12 +2392,22 @@ export default function App() {
               </div>
             </>
           )}
-          {active === "staff" && <StaffPage staff={staff} tasks={tasks} onAdd={() => setModal({ staffModal: true })} onDelete={deleteStaff} />}
+          {active === "staff" && (
+            <StaffPage
+              staff={staff}
+              tasks={tasks}
+              onAdd={() => setModal({ staffModal: true })}
+              onEdit={(person) => setModal({ staffModal: true, staff: person })}
+              onDelete={deleteStaff}
+              onImport={() => setImportOpen(true)}
+            />
+          )}
           {active === "analytics" && <Analytics analytics={analytics} />}
         </div>
       </main>
+      {importOpen && <StaffImportModal onClose={() => setImportOpen(false)} onConfirm={importStaff} onResetRoster={resetRoster} />}
       {modal?.staffModal
-        ? <StaffModal onClose={() => setModal(null)} onSave={addStaff} />
+        ? <StaffModal staff={modal.staff} onClose={() => setModal(null)} onSave={saveStaff} />
         : modal && <TaskModal task={modal.id ? modal : null} staff={staff} onClose={() => setModal(null)} onSave={save} />}
       {transitionModal && (
         <StatusTransitionModal

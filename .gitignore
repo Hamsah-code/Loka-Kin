@@ -86,3 +86,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Snapshot database lokal (dibuat runtime oleh backend/db.py)
+backend/data/*.json

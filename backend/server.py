@@ -1,32 +1,27 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, File, Form, HTTPException, UploadFile
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
-import os, uuid, asyncio
+import hashlib, json, os, tempfile, uuid, asyncio
+
+from db import create_database
+from pdf_import import extract_rows
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-mongo_url = os.environ.get("MONGO_URL", "mock")
-if mongo_url == "mock" or not mongo_url:
-    try:
-        from mongomock_motor import AsyncMongoMockClient
-        client = AsyncMongoMockClient()
-    except ImportError:
-        client = AsyncIOMotorClient("mongodb://localhost:27017")
-else:
-    client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get("DB_NAME", "loka_kin")]
+DATA_FILE = ROOT_DIR / "data" / "loka_kin_db.json"
+mongo_url = os.environ.get("MONGO_URL", "")
+db, client, DB_MODE = create_database(mongo_url, os.environ.get("DB_NAME", "loka_kin"), DATA_FILE)
 app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
 DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum", "Sarana & Prasarana", "Clinical Supervisor"]
 
-# Pemetaan bagian pada DAFTAR HADIR STAF ke departemen resmi aplikasi
+# Pemetaan bagian/jabatan pada DAFTAR STAF ke departemen resmi aplikasi
 DEPT_MAP = {
     "Layanan Sosial": "Layanan Rehabilitasi Sosial",
     "Layanan Medis": "Layanan Rehabilitasi Medis",
@@ -35,8 +30,15 @@ DEPT_MAP = {
     "Perencanaan": "Perencanaan",
     "Umum": "Umum",
     "Administrasi & SDM": "Admin",
+    "Administrasi dan SDM": "Admin",
     "Sarana Prasarana": "Sarana & Prasarana",
+    "Sarana & Prasarana": "Sarana & Prasarana",
     "Pengadaan Barang & Jasa": "Admin",
+    "Humas": "Informasi dan Humas",
+    "Informasi dan Humas": "Informasi dan Humas",
+    "Layanan Rehabilitasi Sosial": "Layanan Rehabilitasi Sosial",
+    "Layanan Rehabilitasi Medis": "Layanan Rehabilitasi Medis",
+    "Admin": "Admin",
 }
 
 # Sumber: DAFTAR HADIR STAF.docx (78 staf resmi)
@@ -123,6 +125,9 @@ SEED_STAFF = [
 
 TITLE_TOKENS = {"dr", "ns", "hj", "h", "drs", "dra", "mr", "mrs"}
 
+# Sidik jari daftar staf resmi terakhir yang sudah disinkronkan ke database.
+_seed_signature: Optional[str] = None
+
 
 def make_initials(name: str) -> str:
     cleaned = name.replace(".", " ").replace(",", " ")
@@ -132,8 +137,31 @@ def make_initials(name: str) -> str:
     return initials or name[:2].upper()
 
 
+def infer_id_type(nip: str) -> str:
+    """Tebak jenis nomor identitas: NIP (PNS, 18 digit) atau NIK (16 digit)."""
+    digits = "".join(ch for ch in str(nip or "") if ch.isdigit())
+    if not digits:
+        return ""
+    if len(digits) == 18:
+        return "NIP"
+    if len(digits) == 16:
+        return "NIK"
+    return "NIP" if len(digits) > 16 else "NIK"
+
+
+def seed_key_for(staff_id: str, name: str, department: str, nip: str, id_type: str, keterangan: str) -> str:
+    raw = "|".join([staff_id, name, department, str(nip or ""), id_type, keterangan or ""])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def resolve_department(doc_dept: str) -> str:
-    return DEPT_MAP.get(doc_dept, "Admin")
+    """Normalisasi bagian/jabatan pada daftar staf ke departemen resmi aplikasi."""
+    if not doc_dept:
+        return "Admin"
+    mapped = DEPT_MAP.get(doc_dept)
+    if mapped:
+        return mapped
+    return doc_dept if doc_dept in DEPARTMENTS else "Admin"
 
 
 def staff_sort_key(person):
@@ -152,11 +180,45 @@ class Staff(BaseModel):
     department: str
     initials: str
     active: bool = True
+    # Nomor identitas pegawai: NIP (PNS) atau NIK (non-PNS).
+    nip: str = ""
+    id_type: str = ""          # "NIP" | "NIK" | "" (belum diisi)
+    keterangan: str = ""       # jabatan/instalasi/bagian pada daftar staf
+    position: str = ""         # jabatan (bila tersedia)
 
 
 class StaffCreate(BaseModel):
     name: str
     department: str
+    nip: str = ""
+    id_type: str = ""
+    keterangan: str = ""
+    position: str = ""
+
+
+class StaffUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: Optional[str] = None
+    department: Optional[str] = None
+    nip: Optional[str] = None
+    id_type: Optional[str] = None
+    keterangan: Optional[str] = None
+    position: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class StaffImportRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    bagian: str = ""       # keterangan jabatan/instalasi/bagian pada daftar staf
+    nip: str = ""          # NIP (18 digit) atau NIK (16 digit)
+    department: str = ""   # opsional: paksa departemen tertentu
+
+
+class StaffImportRequest(BaseModel):
+    rows: List[StaffImportRow]
+    mode: str = "replace"  # "replace" = ganti seluruh daftar, "merge" = tambahkan
+    source: str = "impor manual"
 
 
 class TaskCreate(BaseModel):
@@ -183,27 +245,112 @@ class Task(TaskCreate):
     created_at: str
 
 
-async def seed_data():
-    # Idempotent upsert staff-1..staff-78 dari SEED_STAFF (sumber DAFTAR HADIR STAF.docx)
-    for i, (name, doc_dept) in enumerate(SEED_STAFF, start=1):
-        await db.staff.update_one(
-            {"id": f"staff-{i}"},
-            {"$set": {
-                "id": f"staff-{i}",
-                "name": name,
-                "department": resolve_department(doc_dept),
-                "initials": make_initials(name),
-                "active": True,
-            }},
-            upsert=True,
-        )
-    # Bersihkan staf lama staff-N (N > 78) yang tidak memiliki tugas
-    stale_cursor = db.staff.find({"id": {"$regex": r"^staff-\d+$"}}, {"_id": 0, "id": 1})
+ROSTER_KEY = "staff_roster"
+
+
+def row_to_dict(row) -> Dict[str, Any]:
+    """Normalisasi entri SEED_STAFF (tuple) maupun hasil impor (dict)."""
+    if isinstance(row, dict):
+        return {
+            "name": str(row.get("name", "")).strip(),
+            "bagian": str(row.get("bagian") or row.get("keterangan") or "").strip(),
+            "nip": str(row.get("nip") or "").strip(),
+            "position": str(row.get("position") or "").strip(),
+            "department": str(row.get("department") or "").strip(),
+        }
+    name = row[0] if len(row) > 0 else ""
+    bagian = row[1] if len(row) > 1 else ""
+    nip = row[2] if len(row) > 2 else ""
+    position = row[3] if len(row) > 3 else ""
+    return row_to_dict({"name": name, "bagian": bagian, "nip": nip, "position": position})
+
+
+async def active_roster() -> tuple[List[Dict[str, Any]], str]:
+    """Daftar staf yang berlaku: hasil impor bila ada, jika tidak daftar bawaan."""
+    doc = await db.settings.find_one({"key": ROSTER_KEY}, {"_id": 0})
+    if doc and doc.get("rows"):
+        return [row_to_dict(r) for r in doc["rows"]], doc.get("source") or "impor"
+    return [row_to_dict(r) for r in SEED_STAFF], "daftar bawaan aplikasi (DAFTAR HADIR STAF.docx)"
+
+
+async def save_roster(rows: List[Dict[str, Any]], source: str) -> None:
+    await db.settings.update_one(
+        {"key": ROSTER_KEY},
+        {"$set": {"key": ROSTER_KEY, "rows": rows, "source": source, "updated_at": datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()}},
+        upsert=True,
+    )
+
+
+async def seed_data(force: bool = False):
+    """Sinkronkan daftar staf resmi (SEED_STAFF) ke database secara idempotent.
+
+    Staf yang belum ada dibuat sebagai ``staff-1..staff-N`` sesuai urutan daftar
+    resmi. Staf yang sudah ada hanya ditimpa bila sumbernya (nama/bagian/NIP)
+    berubah — perubahan yang dilakukan admin lewat aplikasi tetap dipertahankan.
+
+    Fungsi ini aman dipanggil di setiap request karena langsung keluar bila
+    daftar resmi belum berubah sejak sinkronisasi terakhir.
+    """
+    global _seed_signature
+    roster, _source = await active_roster()
+    signature = hashlib.sha1(json.dumps(roster, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    if not force and _seed_signature == signature:
+        return
+    for i, row in enumerate(roster, start=1):
+        name = row["name"]
+        doc_dept = row.get("bagian") or row.get("department") or ""
+        nip = row.get("nip") or ""
+        position = row.get("position") or ""
+        staff_id = f"staff-{i}"
+        department = row.get("department") or resolve_department(doc_dept)
+        id_type = infer_id_type(nip)
+        seed_key = seed_key_for(staff_id, name, department, nip, id_type, doc_dept)
+        payload = {
+            "id": staff_id,
+            "name": name,
+            "department": department,
+            "initials": make_initials(name),
+            "active": True,
+            "nip": nip,
+            "id_type": id_type,
+            "keterangan": doc_dept or position,
+            "position": position,
+            "seed_key": seed_key,
+        }
+        existing = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+        if existing is None:
+            await db.staff.insert_one({**payload, "archived": False})
+            continue
+
+        changes: Dict[str, Any] = {}
+        if existing.get("seed_key") != seed_key:
+            # Daftar resmi berubah (atau data lama belum punya field baru) → sinkronkan.
+            changes.update(payload)
+            changes["active"] = True if existing.get("archived") else existing.get("active", True)
+        if existing.get("archived"):
+            # Kembali tercantum pada daftar terbaru → aktifkan lagi.
+            changes["active"] = True
+            changes["archived"] = False
+        if changes:
+            await db.staff.update_one(
+                {"id": staff_id},
+                {"$set": changes, "$unset": {"archive_reason": ""}},
+            )
+
+    # Staf di luar jumlah daftar resmi: hapus bila tanpa laporan, arsipkan bila masih
+    # memiliki laporan (agar riwayat kinerja tetap menunjuk orang yang benar).
+    total_official = len(roster)
+    stale_cursor = db.staff.find({"id": {"$regex": r"^staff-\d+$"}}, {"_id": 0, "id": 1, "active": 1})
     async for row in stale_cursor:
         tail = row["id"].split("-", 1)[1]
-        if tail.isdigit() and int(tail) > 78:
+        if tail.isdigit() and int(tail) > total_official:
             if await db.tasks.count_documents({"staff_id": row["id"]}) == 0:
                 await db.staff.delete_one({"id": row["id"]})
+            elif row.get("active", True):
+                await db.staff.update_one(
+                    {"id": row["id"]},
+                    {"$set": {"active": False, "archived": True, "archive_reason": "Tidak ada pada daftar staf terbaru"}},
+                )
 
     # Migrasi tugas eksisting dari 'plan' ke 'todo' & lengkapi timestamp
     jakarta_now = datetime.now(ZoneInfo("Asia/Jakarta"))
@@ -244,9 +391,11 @@ async def root():
 
 
 @api.get("/staff", response_model=List[Staff])
-async def get_staff():
+async def get_staff(include_inactive: bool = True):
+    """Daftar staf. `include_inactive=false` menyaring hanya staf yang masih aktif."""
     await seed_data()
-    rows = await db.staff.find({}, {"_id": 0}).to_list(500)
+    query: Dict[str, Any] = {} if include_inactive else {"active": True}
+    rows = await db.staff.find(query, {"_id": 0}).to_list(500)
     rows.sort(key=staff_sort_key)
     return rows
 
@@ -258,9 +407,210 @@ async def create_staff(payload: StaffCreate):
         raise HTTPException(400, "Nama staf wajib diisi")
     if payload.department not in DEPARTMENTS:
         raise HTTPException(400, "Departemen tidak valid")
-    doc = {"id": f"staff-{uuid.uuid4()}", "name": name, "department": payload.department, "initials": make_initials(name), "active": True}
+    nip = (payload.nip or "").strip()
+    doc = {
+        "id": f"staff-{uuid.uuid4()}",
+        "name": name,
+        "department": payload.department,
+        "initials": make_initials(name),
+        "active": True,
+        "nip": nip,
+        "id_type": (payload.id_type or "").strip() or infer_id_type(nip),
+        "keterangan": (payload.keterangan or "").strip(),
+        "position": (payload.position or "").strip(),
+    }
     await db.staff.insert_one(doc)
     return doc
+
+
+@api.post("/staff/import")
+async def import_staff(payload: StaffImportRequest):
+    """Impor daftar staf resmi (menggantikan atau menambah) lalu sinkronkan database.
+
+    Mode ``replace`` mengganti seluruh daftar resmi sehingga nama staf pada slot
+    ``staff-1..staff-N`` mengikuti daftar baru. Tugas yang sudah ada tetap
+    terhubung ke slot yang sama.
+    """
+    if payload.mode not in {"replace", "merge"}:
+        raise HTTPException(400, "Mode impor harus 'replace' atau 'merge'")
+
+    cleaned: List[Dict[str, Any]] = []
+    skipped = 0
+    seen = set()
+    for row in payload.rows:
+        name = (row.name or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        bagian = (row.bagian or "").strip()
+        department = (row.department or "").strip()
+        if department and department not in DEPARTMENTS:
+            department = resolve_department(department)
+        if not department:
+            department = resolve_department(bagian)
+        entry = {
+            "name": name,
+            "bagian": bagian,
+            "nip": (row.nip or "").strip(),
+            "position": "",
+            "department": department,
+        }
+        dedupe = (name.lower(), entry["nip"])
+        if dedupe in seen:
+            skipped += 1
+            continue
+        seen.add(dedupe)
+        cleaned.append(entry)
+
+    if not cleaned:
+        raise HTTPException(400, "Tidak ada baris staf yang valid untuk diimpor")
+
+    if payload.mode == "merge":
+        base_rows, _ = await active_roster()
+        existing_keys = {(str(r.get("name", "")).lower(), str(r.get("nip") or "")) for r in base_rows}
+        base_rows = base_rows + [
+            row for row in cleaned if (row["name"].lower(), row["nip"]) not in existing_keys
+        ]
+    else:
+        base_rows = cleaned
+
+    await save_roster(base_rows, payload.source or "impor manual")
+    global _seed_signature
+    _seed_signature = None  # paksa sinkronisasi ulang
+    await seed_data(force=True)
+    await normalize_staff_identity()
+
+    return {
+        "ok": True,
+        "mode": payload.mode,
+        "imported": len(cleaned),
+        "skipped": skipped,
+        "total_roster": len(base_rows),
+        "total_staff": await db.staff.count_documents({}),
+        "source": payload.source or "impor manual",
+    }
+
+
+@api.get("/staff/roster")
+async def get_roster():
+    """Daftar staf resmi yang sedang berlaku (hasil impor atau daftar bawaan)."""
+    rows, source = await active_roster()
+    return {"source": source, "count": len(rows), "rows": rows}
+
+
+@api.post("/staff/parse-pdf")
+async def parse_staff_pdf(file: UploadFile = File(...)):
+    """Baca berkas PDF daftar staf dan kembalikan barisnya (tanpa menyimpan)."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".pdf"):
+        raise HTTPException(400, "Berkas harus berformat PDF")
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(400, "Berkas PDF kosong")
+    if len(payload) > 20 * 1024 * 1024:
+        raise HTTPException(400, "Ukuran PDF melebihi 20 MB")
+
+    tmp_path = Path(tempfile.gettempdir()) / f"loka-kin-{uuid.uuid4().hex}.pdf"
+    tmp_path.write_bytes(payload)
+    try:
+        result = extract_rows(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # PDF rusak / tidak didukung
+        raise HTTPException(400, f"PDF tidak dapat dibaca: {exc}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return {"filename": file.filename, **result}
+
+
+@api.post("/staff/import-pdf")
+async def import_staff_pdf(
+    file: UploadFile = File(...),
+    mode: str = Form("replace"),
+    source: str = Form("impor PDF"),
+):
+    """Baca PDF daftar staf lalu langsung menyinkronkan seluruh staf ke database."""
+    if mode not in {"replace", "merge"}:
+        raise HTTPException(400, "Mode impor harus 'replace' atau 'merge'")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(400, "Berkas PDF kosong")
+    tmp_path = Path(tempfile.gettempdir()) / f"loka-kin-{uuid.uuid4().hex}.pdf"
+    tmp_path.write_bytes(payload)
+    try:
+        parsed = extract_rows(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(400, f"PDF tidak dapat dibaca: {exc}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    rows = [
+        StaffImportRow(name=row["name"], bagian=row.get("bagian", ""), nip=row.get("nip", ""))
+        for row in parsed["rows"]
+    ]
+    result = await import_staff(
+        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor PDF"))
+    )
+    result["parsed_rows"] = parsed["count"]
+    result["with_nip"] = parsed["with_nip"]
+    result["warnings"] = parsed["warnings"]
+    return result
+
+
+@api.delete("/staff/roster")
+async def reset_roster():
+    """Kembalikan daftar staf ke daftar bawaan aplikasi (membatalkan hasil impor)."""
+    await db.settings.delete_one({"key": ROSTER_KEY})
+    global _seed_signature
+    _seed_signature = None
+    await seed_data(force=True)
+    await normalize_staff_identity()
+    rows, source = await active_roster()
+    return {
+        "ok": True,
+        "roster_source": source,
+        "roster_count": len(rows),
+        "total_staff": await db.staff.count_documents({}),
+        "active_staff": await db.staff.count_documents({"active": True}),
+    }
+
+
+@api.put("/staff/{staff_id}", response_model=Staff)
+async def update_staff(staff_id: str, payload: StaffUpdate):
+    existing = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Staf tidak ditemukan")
+
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if "name" in changes:
+        name = str(changes["name"]).strip()
+        if not name:
+            raise HTTPException(400, "Nama staf wajib diisi")
+        changes["name"] = name
+        changes["initials"] = make_initials(name)
+    if "department" in changes and changes["department"] not in DEPARTMENTS:
+        raise HTTPException(400, "Departemen tidak valid")
+    if "nip" in changes:
+        changes["nip"] = str(changes["nip"]).strip()
+        # Jenis nomor dihitung ulang dari panjang NIP/NIK kecuali dikirim eksplisit.
+        if "id_type" not in changes:
+            changes["id_type"] = infer_id_type(changes["nip"])
+    if "id_type" in changes:
+        changes["id_type"] = str(changes["id_type"]).strip()
+    if "keterangan" in changes:
+        changes["keterangan"] = str(changes["keterangan"]).strip()
+    if "position" in changes:
+        changes["position"] = str(changes["position"]).strip()
+
+    if changes:
+        await db.staff.update_one({"id": staff_id}, {"$set": changes})
+
+    fresh = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    return fresh
 
 
 @api.delete("/staff/{staff_id}")
@@ -690,8 +1040,52 @@ async def scheduled_export_loop():
         await db.export_logs.insert_one({"id": str(uuid.uuid4()), "mode": "automatic", "status": "simulated", "exported_at": exported_at.isoformat(), "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"})
 
 
+@api.get("/database/status")
+async def database_status():
+    """Informasi mode database aktif dan jumlah dokumen tersimpan."""
+    await seed_data()
+    collections = ["staff", "tasks", "export_logs", "settings"]
+    counts = {}
+    for name in collections:
+        counts[name] = await db[name].count_documents({})
+    roster, source = await active_roster()
+    return {
+        "mode": DB_MODE,
+        "persistent": db.persistent,
+        "data_file": str(DATA_FILE) if db.persistent else None,
+        "database": os.environ.get("DB_NAME", "loka_kin"),
+        "collections": counts,
+        "total_documents": sum(counts.values()),
+        "roster_source": source,
+        "roster_count": len(roster),
+    }
+
+
+async def normalize_staff_identity():
+    """Pastikan jenis nomor (NIP/NIK) selalu konsisten dengan panjang NIP yang tersimpan."""
+    fixed = 0
+    async for row in db.staff.find({}, {"_id": 0, "id": 1, "nip": 1, "id_type": 1}):
+        expected = infer_id_type(row.get("nip") or "")
+        if (row.get("id_type") or "") != expected:
+            await db.staff.update_one({"id": row["id"]}, {"$set": {"id_type": expected}})
+            fixed += 1
+    return fixed
+
+
+async def startup_database():
+    """Pulihkan snapshot lokal (bila ada), lalu sinkronkan daftar staf resmi."""
+    restored = await db.restore()
+    if restored:
+        print(f"[db] {restored} dokumen dipulihkan dari {DATA_FILE}")
+    await seed_data()
+    fixed = await normalize_staff_identity()
+    print(f"[db] mode={DB_MODE}, koleksi={await db['staff'].count_documents({})} staf tersedia"
+          + (f", {fixed} jenis nomor disinkronkan" if fixed else ""))
+
+
 @app.on_event("startup")
 async def start_scheduler():
+    await startup_database()
     app.state.export_scheduler = asyncio.create_task(scheduled_export_loop())
 
 
