@@ -197,7 +197,7 @@ export default function LandingPage({ onNavigateToDashboard }) {
           <header className="landing-header">
             <a className="landing-brand" href="#home" aria-label="LOKA-Kin beranda" onClick={() => setMobileMenuOpen(false)}>
               <span className="landing-brand-mark"><ShieldCheck size={24} strokeWidth={2.7} /></span>
-              <span className="landing-brand-name">Loka<span>-Kin</span><small>Kinerja tim, lebih berarti</small></span>
+              <span className="landing-brand-name">Loka<span>-Kin</span></span>
             </a>
 
             <button
@@ -225,9 +225,8 @@ export default function LandingPage({ onNavigateToDashboard }) {
 
             <div className="landing-header-actions">
               <a className="landing-home-quicklink" href="#home" data-testid="landing-home-quicklink" onClick={() => setMobileMenuOpen(false)}>Home</a>
-              <button className="landing-login-button" type="button" onClick={openDashboard}>Masuk</button>
               <button className="landing-header-cta" type="button" onClick={openDashboard}>
-                Dashboard <ArrowUpRight size={15} />
+                Masuk <ArrowUpRight size={15} />
               </button>
             </div>
           </header>
@@ -242,7 +241,7 @@ export default function LandingPage({ onNavigateToDashboard }) {
                 </p>
                 <div className="hero-actions">
                   <button className="hero-button hero-button-start" type="button" onClick={openDashboard}>
-                    Mulai Uji Coba <ArrowRight size={17} />
+                    Masuk <ArrowRight size={17} />
                   </button>
                 </div>
                 <div className="hero-assurance">
@@ -304,7 +303,7 @@ export default function LandingPage({ onNavigateToDashboard }) {
 
       <footer className="landing-footer">
         <a className="landing-footer-brand" href="#home"><span className="landing-brand-mark"><ShieldCheck size={19} /></span> Loka-Kin</a>
-        <span>© {new Date().getFullYear()} LOKA-Kin · Kinerja tim, lebih berarti.</span>
+        <span>© {new Date().getFullYear()} LOKA-Kin.</span>
         <a href="#home">Kembali ke atas <ChevronDown size={14} /></a>
       </footer>
     </div>

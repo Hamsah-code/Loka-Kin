@@ -96,8 +96,9 @@
 }
 
 .landing-brand-name {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
   color: #fff;
   font: 800 22px/1 'Plus Jakarta Sans', sans-serif;
   letter-spacing: -.7px;
@@ -105,13 +106,6 @@
 
 .landing-brand-name > span {
   display: inline;
-}
-
-.landing-brand-name small {
-  margin-top: 5px;
-  color: rgba(239, 246, 255, .75);
-  font: 500 9px/1 'DM Sans', sans-serif;
-  letter-spacing: .35px;
 }
 
 .landing-nav {
@@ -177,7 +171,6 @@
   text-decoration: none;
 }
 
-.landing-login-button,
 .landing-header-cta {
   display: inline-flex;
   min-height: 43px;
@@ -190,21 +183,11 @@
   font-size: 11px;
   font-weight: 800;
   transition: transform .2s ease, box-shadow .2s ease, background .2s ease;
-}
-
-.landing-login-button {
-  border-color: rgba(255, 255, 255, .52);
-  background: rgba(255, 255, 255, .04);
-  color: #fff;
-}
-
-.landing-header-cta {
   background: #fff;
   color: #2748bb;
   box-shadow: 0 8px 22px rgba(20, 30, 119, .2);
 }
 
-.landing-login-button:hover,
 .landing-header-cta:hover,
 .hero-button:hover,
 .landing-cta-section button:hover {
@@ -1214,7 +1197,6 @@
   .landing-brand-name { font-size: 20px; }
   .landing-nav { gap: 17px; }
   .landing-nav-link { font-size: 10px; }
-  .landing-header-actions .landing-login-button { display: none; }
   .landing-hero { min-height: 890px; grid-template-columns: 1fr; gap: 10px; padding: 38px 6% 122px; }
   .hero-copy { max-width: 650px; }
   .hero-copy h1 { max-width: 680px; font-size: clamp(50px, 7vw, 70px); }
@@ -1234,10 +1216,8 @@
   .landing-brand-mark { width: 34px; height: 34px; border-radius: 10px; }
   .landing-brand-mark svg { width: 21px; }
   .landing-brand-name { font-size: 18px; }
-  .landing-brand-name small { font-size: 8px; }
   .landing-menu-toggle { display: inline-flex; order: 3; }
   .landing-header-actions { margin-left: auto; gap: 5px; }
-  .landing-header-actions .landing-login-button { display: none; }
   .landing-home-quicklink { display: inline-flex; border: 1px solid rgba(255, 255, 255, .24); background: rgba(255, 255, 255, .08); }
   .landing-header-cta { min-height: 40px; padding: 0 14px; font-size: 10px; }
   .landing-nav {
