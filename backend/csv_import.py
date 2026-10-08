@@ -33,8 +33,10 @@ NAME_FIELD_HINTS = ("nama", "name", "pegawai", "staf", "petugas", "personil")
 ID_FIELD_HINTS = ("nip", "nik", "nrp", "nomor induk", "no induk", "nomor pegawai", "id")
 KETERANGAN_FIELD_HINTS = (
     "jabatan", "keterangan", "bagian", "instalasi", "unit kerja", "unit", "posisi",
-    "peran", "tugas", "profesi", "status", "ruang", "bidang", "seksi", "departemen",
+    "tugas", "profesi", "status", "ruang", "bidang", "seksi", "departemen",
 )
+ROLE_FIELD_HINTS = ("role akun", "peran akun", "hak akses", "role", "peran")
+SUPERVISION_FIELD_HINTS = ("departemen diawasi", "unit diawasi", "departemen pengawasan", "supervised department")
 IGNORED_FIELD_HINTS = ("no", "nomor", "urut", "no.", "no ")
 
 
@@ -114,7 +116,7 @@ def find_header_row(grid: Sequence[Sequence[str]]) -> Optional[int]:
                 name_hit = True
             elif any(h in low for h in ID_FIELD_HINTS):
                 hits += 1
-            elif any(h in low for h in KETERANGAN_FIELD_HINTS):
+            elif any(h in low for h in KETERANGAN_FIELD_HINTS + ROLE_FIELD_HINTS + SUPERVISION_FIELD_HINTS):
                 hits += 1
             elif any(h in low for h in IGNORED_FIELD_HINTS):
                 hits += 1
@@ -137,10 +139,14 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
         return []
     width = max(len(row) for row in data_rows)
 
-    name_col = ket_col = id_col = None
+    name_col = ket_col = id_col = role_col = supervised_col = None
     for idx, cell in enumerate(header):
         low = cell.lower()
-        if id_col is None and any(h in low for h in ID_FIELD_HINTS):
+        if supervised_col is None and any(h in low for h in SUPERVISION_FIELD_HINTS):
+            supervised_col = idx
+        elif role_col is None and any(h in low for h in ROLE_FIELD_HINTS):
+            role_col = idx
+        elif id_col is None and any(h in low for h in ID_FIELD_HINTS):
             id_col = idx
         elif name_col is None and any(h in low for h in NAME_FIELD_HINTS):
             name_col = idx
@@ -166,7 +172,7 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
     if name_col is None:
         text_columns = [
             (idx, s["avg_len"]) for idx, s in stats.items()
-            if idx != id_col and s and s["letters"] >= 0.6 and s["avg_len"] >= 3
+            if idx != id_col and idx not in {role_col, supervised_col} and s and s["letters"] >= 0.6 and s["avg_len"] >= 3
         ]
         if id_col is not None:
             before_id = [item for item in text_columns if item[0] < id_col]
@@ -204,7 +210,7 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
         name_parts = []
         for idx in range(min(first, len(cells)), min(stop, len(cells))):
             value = cells[idx]
-            if not value or find_id_token(value) or not re.search(r"[a-zA-Z]", value):
+            if idx in {role_col, supervised_col} or not value or find_id_token(value) or not re.search(r"[a-zA-Z]", value):
                 continue
             name_parts.append(value)
         name = strip_leading_numbering(join_name_parts(name_parts)) if name_parts else ""
@@ -229,7 +235,7 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
         start = (id_col + 1) if id_col is not None else (first + 1)
         for idx in range(start, len(cells)):
             value = cells[idx]
-            if not usable_as_keterangan(value):
+            if idx in {role_col, supervised_col} or not usable_as_keterangan(value):
                 continue
             if idx == ket_col or value in bagian_parts or value in name_parts or value in name:
                 continue
@@ -241,7 +247,7 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
 
         if not bagian_parts:
             for idx, value in enumerate(cells):
-                if not usable_as_keterangan(value):
+                if idx in {role_col, supervised_col} or not usable_as_keterangan(value):
                     continue
                 if idx in (id_col, name_col) or value in name_parts or value in name or value in bagian_parts:
                     continue
@@ -256,7 +262,19 @@ def parse_rows(raw_rows: Sequence[Sequence[str]]) -> List[Dict[str, str]]:
             continue
         if HEADER_WORD_ONLY.match(name):
             continue
-        rows.append({"name": clean_text(name), "nip": nip, "bagian": clean_text(bagian)})
+        role = clean_text(cell(role_col))
+        supervised_departments = [
+            clean_text(value)
+            for value in re.split(r"[;|,/]+", cell(supervised_col))
+            if clean_text(value)
+        ]
+        rows.append({
+            "name": clean_text(name),
+            "nip": nip,
+            "bagian": clean_text(bagian),
+            "role": role,
+            "supervised_departments": supervised_departments,
+        })
     return rows
 
 

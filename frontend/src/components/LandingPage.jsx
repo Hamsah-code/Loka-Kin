@@ -176,12 +176,12 @@ function DashboardArtwork() {
   );
 }
 
-export default function LandingPage({ onNavigateToDashboard }) {
+export default function LandingPage({ onLogin, authenticated = false }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const openDashboard = () => {
     setMobileMenuOpen(false);
-    onNavigateToDashboard?.();
+    onLogin?.();
   };
 
   return (
@@ -226,7 +226,7 @@ export default function LandingPage({ onNavigateToDashboard }) {
             <div className="landing-header-actions">
               <a className="landing-home-quicklink" href="#home" data-testid="landing-home-quicklink" onClick={() => setMobileMenuOpen(false)}>Home</a>
               <button className="landing-header-cta" type="button" onClick={openDashboard}>
-                Masuk <ArrowUpRight size={15} />
+                {authenticated ? "Dashboard" : "Masuk"} <ArrowUpRight size={15} />
               </button>
             </div>
           </header>
@@ -241,7 +241,7 @@ export default function LandingPage({ onNavigateToDashboard }) {
                 </p>
                 <div className="hero-actions">
                   <button className="hero-button hero-button-start" type="button" onClick={openDashboard}>
-                    Masuk <ArrowRight size={17} />
+                    {authenticated ? "Buka dashboard" : "Masuk"} <ArrowRight size={17} />
                   </button>
                 </div>
                 <div className="hero-assurance">

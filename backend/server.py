@@ -1,12 +1,25 @@
-from fastapi import FastAPI, APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
-import hashlib, json, os, tempfile, uuid, asyncio
+from secrets import token_urlsafe
+import hashlib, json, os, re, tempfile, uuid, asyncio
+
+from auth_utils import (
+    constant_time_equal,
+    generate_activation_code,
+    hash_credential,
+    hash_session_token,
+    normalize_activation_code,
+    normalize_identity,
+    valid_identity,
+    valid_pin,
+    verify_credential,
+)
 
 from db import create_database
 from csv_import import extract_rows as extract_csv_rows
@@ -21,6 +34,42 @@ app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
 DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum", "Sarana & Prasarana", "Clinical Supervisor"]
+
+ROLE_LABELS = {
+    "staff": "Staf",
+    "admin": "Admin",
+    "team_lead": "Ketua Tim",
+    "clinical_supervisor": "Clinical Supervisor",
+    "head": "Kepala",
+}
+VALID_ROLES = set(ROLE_LABELS)
+SUPERVISOR_ROLES = {"team_lead", "clinical_supervisor", "head"}
+READ_ALL_ROLES = {"admin", *SUPERVISOR_ROLES}
+SESSION_COOKIE_NAME = "loka_kin_session"
+SESSION_TTL_HOURS = 12
+ACTIVATION_TTL_HOURS = 24
+AUTH_MAX_ATTEMPTS = 5
+AUTH_LOCK_MINUTES = 15
+
+
+def normalize_role(value: str) -> str:
+    raw = str(value or "staff").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "staf": "staff", "pegawai": "staff", "admin": "admin",
+        "ketua_tim": "team_lead", "ketuatim": "team_lead", "team_leader": "team_lead",
+        "clinical_supervisor": "clinical_supervisor", "supervisor_klinis": "clinical_supervisor",
+        "kepala": "head", "head_of_office": "head",
+    }
+    return aliases.get(raw, raw)
+
+
+def valid_supervised_departments(values: List[str]) -> List[str]:
+    clean = []
+    for value in values or []:
+        dept = str(value).strip()
+        if dept and dept in DEPARTMENTS and dept not in clean:
+            clean.append(dept)
+    return clean
 
 # Pemetaan bagian/jabatan pada DAFTAR STAF ke departemen resmi aplikasi
 DEPT_MAP = {
@@ -151,9 +200,25 @@ def infer_id_type(nip: str) -> str:
     return "NIP" if len(digits) > 16 else "NIK"
 
 
-def seed_key_for(staff_id: str, name: str, department: str, nip: str, id_type: str, keterangan: str) -> str:
-    raw = "|".join([staff_id, name, department, str(nip or ""), id_type, keterangan or ""])
+def seed_key_for(
+    staff_id: str,
+    name: str,
+    department: str,
+    nip: str,
+    id_type: str,
+    keterangan: str,
+    role: str = "staff",
+    supervised_departments: Optional[List[str]] = None,
+) -> str:
+    raw = "|".join([
+        staff_id, name, department, str(nip or ""), id_type, keterangan or "", role,
+        ",".join(supervised_departments or []),
+    ])
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def normalized_person_name(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(value or "").lower())).strip()
 
 
 def resolve_department(doc_dept: str) -> str:
@@ -182,20 +247,25 @@ class Staff(BaseModel):
     department: str
     initials: str
     active: bool = True
-    # Nomor identitas pegawai: NIP (PNS) atau NIK (non-PNS).
     nip: str = ""
-    id_type: str = ""          # "NIP" | "NIK" | "" (belum diisi)
-    keterangan: str = ""       # jabatan/instalasi/bagian pada daftar staf
-    position: str = ""         # jabatan (bila tersedia)
+    id_type: str = ""
+    keterangan: str = ""
+    position: str = ""
+    role: str = "staff"
+    supervised_departments: List[str] = Field(default_factory=list)
+    is_activated: bool = False
 
 
 class StaffCreate(BaseModel):
     name: str
     department: str
+    active: bool = True
     nip: str = ""
     id_type: str = ""
     keterangan: str = ""
     position: str = ""
+    role: str = "staff"
+    supervised_departments: List[str] = Field(default_factory=list)
 
 
 class StaffUpdate(BaseModel):
@@ -207,20 +277,46 @@ class StaffUpdate(BaseModel):
     keterangan: Optional[str] = None
     position: Optional[str] = None
     active: Optional[bool] = None
+    role: Optional[str] = None
+    supervised_departments: Optional[List[str]] = None
 
 
 class StaffImportRow(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
-    bagian: str = ""       # keterangan jabatan/instalasi/bagian pada daftar staf
-    nip: str = ""          # NIP (18 digit) atau NIK (16 digit)
-    department: str = ""   # opsional: paksa departemen tertentu
+    bagian: str = ""
+    nip: str = ""
+    department: str = ""
+    role: Optional[str] = None
+    supervised_departments: List[str] = Field(default_factory=list)
 
 
 class StaffImportRequest(BaseModel):
     rows: List[StaffImportRow]
-    mode: str = "replace"  # "replace" = ganti seluruh daftar, "merge" = tambahkan
+    mode: str = "replace"
     source: str = "impor manual"
+
+
+class AuthLoginRequest(BaseModel):
+    nip: str
+    pin: str
+
+
+class AuthActivateRequest(BaseModel):
+    nip: str
+    activation_code: str
+    pin: str
+    pin_confirmation: str
+
+
+class BootstrapAdminRequest(BaseModel):
+    setup_secret: str
+    nip: str
+    roster: Optional[List[StaffImportRow]] = None
+
+
+class ActivationCodeRequest(BaseModel):
+    staff_id: str
 
 
 class TaskCreate(BaseModel):
@@ -247,6 +343,131 @@ class Task(TaskCreate):
     created_at: str
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def parse_datetime(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def public_staff(
+    row: Dict[str, Any],
+    *,
+    reveal_identity: bool,
+    reveal_account_status: bool = False,
+) -> Dict[str, Any]:
+    """Return only UI-safe staff fields; auth hashes and activation codes never leave the API."""
+    safe = {
+        key: row.get(key, default)
+        for key, default in {
+            "id": "", "name": "", "department": "", "initials": "",
+            "active": True, "keterangan": "", "position": "",
+            "role": "staff", "supervised_departments": [],
+        }.items()
+    }
+    if reveal_account_status:
+        safe["is_activated"] = bool(row.get("is_activated"))
+    safe["nip"] = str(row.get("nip") or "") if reveal_identity else ""
+    safe["id_type"] = str(row.get("id_type") or "") if reveal_identity else ""
+    return safe
+
+
+def user_profile(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "department": row.get("department"),
+        "role": row.get("role", "staff"),
+        "role_label": ROLE_LABELS.get(row.get("role", "staff"), "Staf"),
+        "supervised_departments": row.get("supervised_departments") or [],
+    }
+
+
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    authorization = request.headers.get("authorization", "")
+    if not token and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(401, "Silakan masuk untuk melanjutkan.")
+
+    session = await db.auth_sessions.find_one({"token_hash": hash_session_token(token)}, {"_id": 0})
+    expires_at = parse_datetime((session or {}).get("expires_at"))
+    if not session or not expires_at or expires_at <= utc_now():
+        if session:
+            await db.auth_sessions.delete_one({"id": session.get("id")})
+        raise HTTPException(401, "Sesi masuk berakhir. Silakan masuk kembali.")
+
+    user = await db.staff.find_one({"id": session.get("staff_id")}, {"_id": 0})
+    if not user or not user.get("active", True) or not user.get("is_activated"):
+        await db.auth_sessions.delete_one({"id": session.get("id")})
+        raise HTTPException(401, "Akun tidak aktif. Hubungi Admin.")
+    return user
+
+
+async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Fitur ini hanya dapat digunakan Admin.")
+    return user
+
+
+def can_manage_staff_record(user: Dict[str, Any], staff_record: Dict[str, Any]) -> bool:
+    role = user.get("role", "staff")
+    if role == "admin":
+        return True
+    if staff_record.get("active", True) is False:
+        return False
+    if role == "staff":
+        return user.get("id") == staff_record.get("id")
+    return (
+        role in SUPERVISOR_ROLES
+        and staff_record.get("department") in (user.get("supervised_departments") or [])
+    )
+
+
+def is_report_manager(user: Dict[str, Any]) -> bool:
+    return user.get("role") in READ_ALL_ROLES
+
+
+def normalize_task_status(value: Any) -> Optional[str]:
+    status = str(value or "todo").strip().lower()
+    if status in {"plan", "todo"}:
+        return "todo"
+    return status if status in {"doing", "finish"} else None
+
+
+async def issue_activation_code(staff_record: Dict[str, Any], issued_by: str) -> Dict[str, Any]:
+    code = generate_activation_code()
+    expires = utc_now() + timedelta(hours=ACTIVATION_TTL_HOURS)
+    await db.auth_sessions.delete_many({"staff_id": staff_record["id"]})
+    await db.staff.update_one(
+        {"id": staff_record["id"]},
+        {"$set": {
+            "activation_code_hash": hash_credential(normalize_activation_code(code)),
+
+            "activation_code_expires_at": iso_utc(expires),
+            "activation_code_attempts": 0,
+            "activation_code_locked_until": "",
+            "activation_code_issued_by": issued_by,
+            "activation_code_locked_until": "",
+            "login_failed_attempts": 0,
+            "login_locked_until": "",
+            "is_activated": False,
+            "pin_hash": "",
+        }},
+    )
+    return {"staff_id": staff_record["id"], "activation_code": code, "expires_at": iso_utc(expires)}
+
+
 ROSTER_KEY = "staff_roster"
 
 
@@ -256,9 +477,11 @@ def row_to_dict(row) -> Dict[str, Any]:
         return {
             "name": str(row.get("name", "")).strip(),
             "bagian": str(row.get("bagian") or row.get("keterangan") or "").strip(),
-            "nip": str(row.get("nip") or "").strip(),
+            "nip": normalize_identity(row.get("nip") or ""),
             "position": str(row.get("position") or "").strip(),
             "department": str(row.get("department") or "").strip(),
+            "role": normalize_role(row.get("role")) if row.get("role") else "",
+            "supervised_departments": valid_supervised_departments(row.get("supervised_departments") or []),
         }
     name = row[0] if len(row) > 0 else ""
     bagian = row[1] if len(row) > 1 else ""
@@ -308,15 +531,67 @@ async def _sync_seed_data(force: bool = False):
     signature = hashlib.sha1(json.dumps(roster, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     if not force and _seed_signature == signature:
         return
+    all_staff = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    staff_by_id = {person.get("id"): person for person in all_staff if person.get("id")}
+    staff_by_nip: Dict[str, Dict[str, Any]] = {}
+    staff_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    for person in all_staff:
+        identity = normalize_identity(person.get("nip") or "")
+        if identity:
+            staff_by_nip.setdefault(identity, person)
+        staff_by_name.setdefault(normalized_person_name(person.get("name", "")), []).append(person)
+
+    assigned_ids = set()
+    official_ids = set()
     for i, row in enumerate(roster, start=1):
         name = row["name"]
+        name_key = normalized_person_name(name)
         doc_dept = row.get("bagian") or row.get("department") or ""
-        nip = row.get("nip") or ""
+        nip = normalize_identity(row.get("nip") or "")
         position = row.get("position") or ""
-        staff_id = f"staff-{i}"
         department = row.get("department") or resolve_department(doc_dept)
+        slot_id = f"staff-{i}"
+
+        existing = staff_by_nip.get(nip) if nip else None
+        if existing and existing.get("id") in assigned_ids:
+            existing = None
+        if existing is None:
+            matching_names = [
+                candidate for candidate in staff_by_name.get(name_key, [])
+                if candidate.get("id") not in assigned_ids
+            ]
+            if matching_names:
+                matching_names.sort(key=lambda person: (person.get("department") != department, person.get("active") is False))
+                existing = matching_names[0]
+        if existing is None:
+            slot = staff_by_id.get(slot_id)
+            if slot and slot.get("id") not in assigned_ids:
+                if normalized_person_name(slot.get("name", "")) == name_key:
+                    existing = slot
+                elif not slot.get("nip") and not slot.get("is_activated") and not slot.get("pin_hash"):
+                    has_reports = await db.tasks.count_documents({"staff_id": slot_id}) > 0
+                    if not has_reports:
+                        existing = slot
+
+        if existing:
+            staff_id = existing["id"]
+            if not nip and existing.get("nip"):
+                # NIP/NIK kosong di file bukan alasan untuk memutus identitas akun.
+                nip = normalize_identity(existing.get("nip"))
+        else:
+            staff_id = slot_id if slot_id not in staff_by_id else f"staff-{uuid.uuid4()}"
+            existing = None
+
+        role_text = row.get("role") or (existing or {}).get("role") or "staff"
+        role = normalize_role(role_text)
+        if role not in VALID_ROLES:
+            role = "staff"
+        supervised_source = row.get("supervised_departments") or (existing or {}).get("supervised_departments") or []
+        supervised = valid_supervised_departments(supervised_source)
+        if role not in SUPERVISOR_ROLES:
+            supervised = []
         id_type = infer_id_type(nip)
-        seed_key = seed_key_for(staff_id, name, department, nip, id_type, doc_dept)
+        seed_key = seed_key_for(staff_id, name, department, nip, id_type, doc_dept, role, supervised)
         payload = {
             "id": staff_id,
             "name": name,
@@ -327,42 +602,63 @@ async def _sync_seed_data(force: bool = False):
             "id_type": id_type,
             "keterangan": doc_dept or position,
             "position": position,
+            "role": role,
+            "supervised_departments": supervised,
             "seed_key": seed_key,
         }
-        existing = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+        official_ids.add(staff_id)
+        assigned_ids.add(staff_id)
+
         if existing is None:
-            await db.staff.insert_one({**payload, "archived": False})
+            await db.staff.insert_one({**payload, "archived": False, "is_activated": False})
+            staff_by_id[staff_id] = {**payload, "archived": False, "is_activated": False}
+            if nip:
+                staff_by_nip[nip] = staff_by_id[staff_id]
+            staff_by_name.setdefault(name_key, []).append(staff_by_id[staff_id])
             continue
 
         changes: Dict[str, Any] = {}
         if existing.get("seed_key") != seed_key:
-            # Daftar resmi berubah (atau data lama belum punya field baru) → sinkronkan.
             changes.update(payload)
             changes["active"] = True if existing.get("archived") else existing.get("active", True)
         if existing.get("archived"):
-            # Kembali tercantum pada daftar terbaru → aktifkan lagi.
             changes["active"] = True
             changes["archived"] = False
+        old_nip = normalize_identity(existing.get("nip") or "")
+        if old_nip and nip and old_nip != nip:
+            # Identitas berubah: jangan pernah membawa PIN/kode aktivasi lama ke NIP baru.
+            changes.update({
+                "is_activated": False,
+                "pin_hash": "",
+                "activation_code_hash": "",
+                "activation_code_expires_at": "",
+            })
+            await db.auth_sessions.delete_many({"staff_id": staff_id})
         if changes:
             await db.staff.update_one(
                 {"id": staff_id},
                 {"$set": changes, "$unset": {"archive_reason": ""}},
             )
+            refreshed = {**existing, **changes}
+            staff_by_id[staff_id] = refreshed
+            if old_nip and old_nip != nip:
+                staff_by_nip.pop(old_nip, None)
+            if nip:
+                staff_by_nip[nip] = refreshed
+            staff_by_name.setdefault(name_key, []).append(refreshed)
 
-    # Staf di luar jumlah daftar resmi: hapus bila tanpa laporan, arsipkan bila masih
-    # memiliki laporan (agar riwayat kinerja tetap menunjuk orang yang benar).
-    total_official = len(roster)
-    stale_cursor = db.staff.find({"id": {"$regex": r"^staff-\d+$"}}, {"_id": 0, "id": 1, "active": 1})
-    async for row in stale_cursor:
-        tail = row["id"].split("-", 1)[1]
-        if tail.isdigit() and int(tail) > total_official:
-            if await db.tasks.count_documents({"staff_id": row["id"]}) == 0:
-                await db.staff.delete_one({"id": row["id"]})
-            elif row.get("active", True):
-                await db.staff.update_one(
-                    {"id": row["id"]},
-                    {"$set": {"active": False, "archived": True, "archive_reason": "Tidak ada pada daftar staf terbaru"}},
-                )
+    # Orang yang tidak lagi ada pada roster dinonaktifkan, bukan dihapus, agar
+    # laporan historis tetap terhubung ke identitas yang benar.
+    for row in await db.staff.find(
+        {"seed_key": {"$exists": True}},
+        {"_id": 0, "id": 1, "active": 1, "archived": 1},
+    ).to_list(5000):
+        if row["id"] not in official_ids and (row.get("active", True) or not row.get("archived")):
+            await db.staff.update_one(
+                {"id": row["id"]},
+                {"$set": {"active": False, "archived": True, "archive_reason": "Tidak ada pada daftar staf terbaru"}},
+            )
+            await db.auth_sessions.delete_many({"staff_id": row["id"]})
 
     # Migrasi tugas eksisting dari 'plan' ke 'todo' & lengkapi timestamp
     jakarta_now = datetime.now(ZoneInfo("Asia/Jakarta"))
@@ -406,41 +702,286 @@ async def root():
     return {"message": "LOKA-Kin API aktif"}
 
 
-@api.get("/staff", response_model=List[Staff])
-async def get_staff(include_inactive: bool = True):
-    """Daftar staf. `include_inactive=false` menyaring hanya staf yang masih aktif."""
+@api.get("/auth/setup-status")
+async def auth_setup_status():
     await seed_data()
-    query: Dict[str, Any] = {} if include_inactive else {"active": True}
+    admin_count = await db.staff.count_documents({"role": "admin", "is_activated": True, "active": {"$ne": False}})
+    return {
+        "initial_admin_required": admin_count == 0,
+        "initial_admin_setup_enabled": bool(os.environ.get("AUTH_SETUP_SECRET")),
+    }
+
+
+@api.post("/auth/initial-roster/preview")
+async def preview_initial_roster(file: UploadFile = File(...), setup_secret: str = Form(...)):
+    """Owner-only CSV preview used to load the official roster before first Admin."""
+    setup_value = os.environ.get("AUTH_SETUP_SECRET", "")
+    if not setup_value:
+        raise HTTPException(503, "Penyiapan Admin pertama belum diaktifkan oleh pengelola sistem.")
+    if not constant_time_equal(setup_secret, setup_value):
+        raise HTTPException(403, "Kode penyiapan tidak cocok.")
+    await seed_data()
+    if await db.staff.count_documents({"role": "admin", "is_activated": True, "active": {"$ne": False}}):
+        raise HTTPException(409, "Admin pertama sudah diaktifkan; roster dikelola dari akun Admin.")
+    filename = (file.filename or "").lower()
+    if not (filename.endswith(".csv") or filename.endswith(".txt")):
+        raise HTTPException(400, "Roster awal harus diunggah sebagai CSV atau TXT.")
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Berkas roster kosong.")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "Ukuran CSV melebihi 20 MB.")
+    tmp_path = Path(tempfile.gettempdir()) / f"loka-kin-initial-roster-{uuid.uuid4().hex}.csv"
+    tmp_path.write_bytes(content)
+    try:
+        result = extract_csv_rows(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(400, f"CSV tidak dapat dibaca: {exc}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    return {"filename": file.filename, **result}
+
+
+@api.post("/auth/bootstrap-admin")
+async def bootstrap_admin(payload: BootstrapAdminRequest):
+    """Create/activate the first Admin account using a deployment-only setup secret."""
+    await seed_data()
+    setup_secret = os.environ.get("AUTH_SETUP_SECRET", "")
+    if not setup_secret:
+        raise HTTPException(503, "Penyiapan Admin pertama belum diaktifkan oleh pengelola sistem.")
+    if not constant_time_equal(payload.setup_secret, setup_secret):
+        raise HTTPException(403, "Kode penyiapan tidak cocok.")
+    if await db.staff.count_documents({"role": "admin", "is_activated": True, "active": {"$ne": False}}):
+        raise HTTPException(409, "Admin pertama sudah diaktifkan.")
+    if payload.roster is not None:
+        if not payload.roster:
+            raise HTTPException(400, "Roster awal tidak boleh kosong.")
+        await import_staff(
+            StaffImportRequest(rows=payload.roster, mode="replace", source="roster awal (pemilik sistem)"),
+            user={"id": "initial-setup", "role": "admin"},
+        )
+
+    nip = normalize_identity(payload.nip)
+    if not valid_identity(nip):
+        raise HTTPException(400, "Masukkan NIP 18 digit atau NIK 16 digit yang valid.")
+
+    # Bootstrap hanya boleh mengaktifkan akun Admin yang sudah ada di roster;
+    # endpoint ini tidak dapat membuat identitas atau role baru.
+    existing = await db.staff.find_one({"nip": nip}, {"_id": 0})
+    if not existing or existing.get("role") != "admin":
+        raise HTTPException(404, "Akun Admin tidak ditemukan pada roster. Minta pemilik sistem memperbarui roster.")
+    if not existing.get("active", True):
+        raise HTTPException(400, "Akun Admin pada roster tidak aktif.")
+    staff_id = existing["id"]
+    fresh = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    code_info = await issue_activation_code(fresh, "initial-setup")
+    return {
+        "ok": True,
+        "message": "Akun Admin disiapkan. Berikan kode aktivasi ini kepada Admin satu kali.",
+        "staff_id": staff_id,
+        "activation_code": code_info["activation_code"],
+        "expires_at": code_info["expires_at"],
+    }
+
+
+@api.post("/auth/activate")
+async def activate_account(payload: AuthActivateRequest):
+    nip = normalize_identity(payload.nip)
+    if not valid_identity(nip):
+        raise HTTPException(400, "Masukkan NIP/NIK yang valid.")
+    if not valid_pin(payload.pin):
+        raise HTTPException(400, "PIN harus terdiri dari tepat 6 angka.")
+    if payload.pin != payload.pin_confirmation:
+        raise HTTPException(400, "Konfirmasi PIN tidak sama.")
+
+    staff = await db.staff.find_one({"nip": nip}, {"_id": 0})
+    if not staff or not staff.get("active", True):
+        raise HTTPException(400, "Data akun tidak ditemukan atau tidak aktif. Hubungi Admin.")
+
+    locked_until = parse_datetime(staff.get("activation_code_locked_until", ""))
+    if locked_until and locked_until > utc_now():
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi setelah 15 menit.")
+    expires_at = parse_datetime(staff.get("activation_code_expires_at", ""))
+    code_hash = staff.get("activation_code_hash", "")
+    code_matches = bool(code_hash) and verify_credential(normalize_activation_code(payload.activation_code), code_hash)
+    if not code_matches or not expires_at or expires_at <= utc_now():
+        attempts = int(staff.get("activation_code_attempts", 0)) + 1
+        changes: Dict[str, Any] = {"activation_code_attempts": attempts}
+        if attempts >= AUTH_MAX_ATTEMPTS:
+            changes["activation_code_locked_until"] = iso_utc(utc_now() + timedelta(minutes=AUTH_LOCK_MINUTES))
+            changes["activation_code_attempts"] = 0
+        if expires_at and expires_at <= utc_now():
+            changes["activation_code_hash"] = ""
+        await db.staff.update_one({"id": staff["id"]}, {"$set": changes})
+        raise HTTPException(400, "Kode aktivasi tidak valid atau sudah kedaluwarsa. Minta kode baru kepada Admin.")
+
+    await db.staff.update_one(
+        {"id": staff["id"]},
+        {
+            "$set": {
+                "pin_hash": hash_credential(payload.pin),
+                "is_activated": True,
+                "login_failed_attempts": 0,
+                "login_locked_until": "",
+                "activation_code_attempts": 0,
+            },
+            "$unset": {
+                "activation_code_hash": "",
+                "activation_code_expires_at": "",
+                "activation_code_issued_by": "",
+            },
+        },
+    )
+    return {"ok": True, "message": "PIN berhasil dibuat. Silakan masuk menggunakan NIP/NIK dan PIN baru."}
+
+
+@api.post("/auth/login")
+async def login(payload: AuthLoginRequest, request: Request, response: Response):
+    nip = normalize_identity(payload.nip)
+    if not valid_identity(nip) or not re.fullmatch(r"\d{6}", str(payload.pin or "")):
+        raise HTTPException(401, "NIP/NIK atau PIN tidak cocok.")
+    staff = await db.staff.find_one({"nip": nip}, {"_id": 0})
+    if not staff or not staff.get("active", True) or not staff.get("is_activated") or not staff.get("pin_hash"):
+        raise HTTPException(401, "NIP/NIK atau PIN tidak cocok. Jika belum aktif, hubungi Admin untuk kode aktivasi.")
+
+    locked_until = parse_datetime(staff.get("login_locked_until", ""))
+    if locked_until and locked_until > utc_now():
+        raise HTTPException(429, "Akun dikunci sementara setelah beberapa percobaan. Hubungi Admin atau coba lagi nanti.")
+    if not verify_credential(payload.pin, staff.get("pin_hash", "")):
+        attempts = int(staff.get("login_failed_attempts", 0)) + 1
+        changes: Dict[str, Any] = {"login_failed_attempts": attempts}
+        if attempts >= AUTH_MAX_ATTEMPTS:
+            changes["login_locked_until"] = iso_utc(utc_now() + timedelta(minutes=AUTH_LOCK_MINUTES))
+            changes["login_failed_attempts"] = 0
+        await db.staff.update_one({"id": staff["id"]}, {"$set": changes})
+        raise HTTPException(401, "NIP/NIK atau PIN tidak cocok.")
+
+    token = token_urlsafe(32)
+    expires = utc_now() + timedelta(hours=SESSION_TTL_HOURS)
+    await db.auth_sessions.insert_one({
+        "id": str(uuid.uuid4()),
+        "staff_id": staff["id"],
+        "token_hash": hash_session_token(token),
+        "created_at": iso_utc(utc_now()),
+        "expires_at": iso_utc(expires),
+    })
+    await db.staff.update_one(
+        {"id": staff["id"]},
+        {"$set": {"login_failed_attempts": 0, "login_locked_until": "", "last_login_at": iso_utc(utc_now())}},
+    )
+    configured_secure = os.environ.get("AUTH_COOKIE_SECURE")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    secure_cookie = configured_secure.lower() == "true" if configured_secure is not None else (request.url.scheme == "https" or forwarded_proto == "https")
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_TTL_HOURS * 60 * 60,
+        httponly=True,
+        secure=secure_cookie,
+        samesite="lax",
+        path="/",
+    )
+    return {"ok": True, "user": user_profile(staff), "expires_at": iso_utc(expires)}
+
+
+@api.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    authorization = request.headers.get("authorization", "")
+    if not token and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if token:
+        await db.auth_sessions.delete_one({"token_hash": hash_session_token(token)})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", httponly=True, samesite="lax")
+    return {"ok": True}
+
+
+@api.get("/auth/me")
+async def auth_me(user: Dict[str, Any] = Depends(get_current_user)):
+    return user_profile(user)
+
+
+@api.post("/auth/staff/{staff_id}/activation-code")
+async def create_activation_code(staff_id: str, user: Dict[str, Any] = Depends(require_admin)):
+    staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    if not staff:
+        raise HTTPException(404, "Staf tidak ditemukan.")
+    if not valid_identity(staff.get("nip", "")):
+        raise HTTPException(400, "Lengkapi NIP/NIK staf sebelum membuat kode aktivasi.")
+    if not staff.get("active", True):
+        raise HTTPException(400, "Aktifkan kembali data staf sebelum menerbitkan kode.")
+    code_info = await issue_activation_code(staff, user["id"])
+    return {"ok": True, "name": staff.get("name"), **code_info}
+
+
+@api.get("/staff", response_model=List[Staff])
+async def get_staff(include_inactive: bool = True, user: Dict[str, Any] = Depends(get_current_user)):
+    """Staf only see themselves; supervisors can see all names; only Admin sees NIP/NIK."""
+    await seed_data()
+    if user.get("role") == "staff":
+        query: Dict[str, Any] = {"id": user["id"]}
+    elif user.get("role") == "admin" and include_inactive:
+        query = {}
+    elif user.get("role") in SUPERVISOR_ROLES and include_inactive:
+        query = {}
+    else:
+        query = {"active": True}
     rows = await db.staff.find(query, {"_id": 0}).to_list(500)
     rows.sort(key=staff_sort_key)
-    return rows
+    reveal_identity = user.get("role") == "admin"
+    return [
+        public_staff(
+            row,
+            reveal_identity=reveal_identity,
+            reveal_account_status=(reveal_identity or row.get("id") == user.get("id")),
+        )
+        for row in rows
+    ]
 
 
 @api.post("/staff", response_model=Staff)
-async def create_staff(payload: StaffCreate):
+async def create_staff(payload: StaffCreate, user: Dict[str, Any] = Depends(require_admin)):
     name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Nama staf wajib diisi")
     if payload.department not in DEPARTMENTS:
         raise HTTPException(400, "Departemen tidak valid")
-    nip = (payload.nip or "").strip()
+    role = normalize_role(payload.role)
+    if role not in VALID_ROLES:
+        raise HTTPException(400, "Role tidak valid")
+    nip = normalize_identity(payload.nip)
+    if nip and not valid_identity(nip):
+        raise HTTPException(400, "NIP harus 18 digit atau NIK 16 digit.")
+    if nip and await db.staff.find_one({"nip": nip}):
+        raise HTTPException(409, "NIP/NIK tersebut sudah digunakan.")
+    invalid_supervised = [dept for dept in payload.supervised_departments if dept not in DEPARTMENTS]
+    if invalid_supervised:
+        raise HTTPException(400, f"Departemen pengawasan tidak valid: {invalid_supervised[0]}")
+    supervised = valid_supervised_departments(payload.supervised_departments)
+    if role not in SUPERVISOR_ROLES:
+        supervised = []
     doc = {
         "id": f"staff-{uuid.uuid4()}",
         "name": name,
         "department": payload.department,
         "initials": make_initials(name),
-        "active": True,
+        "active": payload.active,
         "nip": nip,
         "id_type": (payload.id_type or "").strip() or infer_id_type(nip),
         "keterangan": (payload.keterangan or "").strip(),
         "position": (payload.position or "").strip(),
+        "role": role,
+        "supervised_departments": supervised,
+        "is_activated": False,
     }
     await db.staff.insert_one(doc)
-    return doc
+    return public_staff(doc, reveal_identity=True, reveal_account_status=True)
 
 
 @api.post("/staff/import")
-async def import_staff(payload: StaffImportRequest):
+async def import_staff(payload: StaffImportRequest, user: Dict[str, Any] = Depends(require_admin)):
     """Impor daftar staf resmi (menggantikan atau menambah) lalu sinkronkan database.
 
     Mode ``replace`` mengganti seluruh daftar resmi sehingga nama staf pada slot
@@ -449,6 +990,8 @@ async def import_staff(payload: StaffImportRequest):
     """
     if payload.mode not in {"replace", "merge"}:
         raise HTTPException(400, "Mode impor harus 'replace' atau 'merge'")
+    previous_roster, previous_source = await active_roster()
+    active_admins_before = await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True})
 
     cleaned: List[Dict[str, Any]] = []
     skipped = 0
@@ -464,14 +1007,30 @@ async def import_staff(payload: StaffImportRequest):
             department = resolve_department(department)
         if not department:
             department = resolve_department(bagian)
+        nip = normalize_identity(row.nip)
+        if nip and not valid_identity(nip):
+            skipped += 1
+            continue
+        raw_role = (row.role or "").strip()
+        role = normalize_role(raw_role) if raw_role else ""
+        if raw_role and role not in VALID_ROLES:
+            raise HTTPException(400, f"Role tidak valid untuk {name}.")
+        invalid_supervised = [dept for dept in row.supervised_departments if dept not in DEPARTMENTS]
+        if invalid_supervised:
+            raise HTTPException(400, f"Departemen pengawasan tidak valid untuk {name}: {invalid_supervised[0]}")
+        supervised = valid_supervised_departments(row.supervised_departments)
+        if role and role not in SUPERVISOR_ROLES:
+            supervised = []
         entry = {
             "name": name,
             "bagian": bagian,
-            "nip": (row.nip or "").strip(),
+            "nip": nip,
             "position": "",
             "department": department,
+            "role": role,
+            "supervised_departments": supervised,
         }
-        dedupe = (name.lower(), entry["nip"])
+        dedupe = ("nip", nip) if nip else ("name", name.lower())
         if dedupe in seen:
             skipped += 1
             continue
@@ -483,10 +1042,17 @@ async def import_staff(payload: StaffImportRequest):
 
     if payload.mode == "merge":
         base_rows, _ = await active_roster()
-        existing_keys = {(str(r.get("name", "")).lower(), str(r.get("nip") or "")) for r in base_rows}
-        base_rows = base_rows + [
-            row for row in cleaned if (row["name"].lower(), row["nip"]) not in existing_keys
-        ]
+        def roster_identity_key(row: Dict[str, Any]):
+            identity = normalize_identity(row.get("nip") or "")
+            return ("nip", identity) if identity else ("name", str(row.get("name", "")).strip().lower())
+        existing_keys = {roster_identity_key(row) for row in base_rows}
+        additions = []
+        for row in cleaned:
+            key = roster_identity_key(row)
+            if key not in existing_keys:
+                additions.append(row)
+                existing_keys.add(key)
+        base_rows = base_rows + additions
     else:
         base_rows = cleaned
 
@@ -495,6 +1061,12 @@ async def import_staff(payload: StaffImportRequest):
     _seed_signature = None  # paksa sinkronisasi ulang
     await seed_data(force=True)
     await normalize_staff_identity()
+    if active_admins_before and not await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}):
+        await save_roster(previous_roster, previous_source)
+        _seed_signature = None
+        await seed_data(force=True)
+        await normalize_staff_identity()
+        raise HTTPException(400, "Impor ditolak agar tidak menghapus Admin aktif terakhir dari roster.")
 
     return {
         "ok": True,
@@ -508,14 +1080,14 @@ async def import_staff(payload: StaffImportRequest):
 
 
 @api.get("/staff/roster")
-async def get_roster():
+async def get_roster(user: Dict[str, Any] = Depends(require_admin)):
     """Daftar staf resmi yang sedang berlaku (hasil impor atau daftar bawaan)."""
     rows, source = await active_roster()
     return {"source": source, "count": len(rows), "rows": rows}
 
 
 @api.post("/staff/parse-pdf")
-async def parse_staff_pdf(file: UploadFile = File(...)):
+async def parse_staff_pdf(file: UploadFile = File(...), user: Dict[str, Any] = Depends(require_admin)):
     """Baca berkas PDF daftar staf dan kembalikan barisnya (tanpa menyimpan)."""
     filename = (file.filename or "").lower()
     if not filename.endswith(".pdf"):
@@ -545,6 +1117,7 @@ async def import_staff_pdf(
     file: UploadFile = File(...),
     mode: str = Form("replace"),
     source: str = Form("impor PDF"),
+    user: Dict[str, Any] = Depends(require_admin),
 ):
     """Baca PDF daftar staf lalu langsung menyinkronkan seluruh staf ke database."""
     if mode not in {"replace", "merge"}:
@@ -569,7 +1142,8 @@ async def import_staff_pdf(
         for row in parsed["rows"]
     ]
     result = await import_staff(
-        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor PDF"))
+        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor PDF")),
+        user=user,
     )
     result["parsed_rows"] = parsed["count"]
     result["with_nip"] = parsed["with_nip"]
@@ -578,13 +1152,21 @@ async def import_staff_pdf(
 
 
 @api.delete("/staff/roster")
-async def reset_roster():
+async def reset_roster(user: Dict[str, Any] = Depends(require_admin)):
     """Kembalikan daftar staf ke daftar bawaan aplikasi (membatalkan hasil impor)."""
+    previous_roster, previous_source = await active_roster()
+    active_admins_before = await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True})
     await db.settings.delete_one({"key": ROSTER_KEY})
     global _seed_signature
     _seed_signature = None
     await seed_data(force=True)
     await normalize_staff_identity()
+    if active_admins_before and not await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}):
+        await save_roster(previous_roster, previous_source)
+        _seed_signature = None
+        await seed_data(force=True)
+        await normalize_staff_identity()
+        raise HTTPException(400, "Reset ditolak agar tidak menghapus Admin aktif terakhir dari roster.")
     rows, source = await active_roster()
     return {
         "ok": True,
@@ -596,7 +1178,7 @@ async def reset_roster():
 
 
 @api.post("/staff/parse-csv")
-async def parse_staff_csv(file: UploadFile = File(...)):
+async def parse_staff_csv(file: UploadFile = File(...), user: Dict[str, Any] = Depends(require_admin)):
     """Baca berkas CSV daftar staf dan kembalikan barisnya (tanpa menyimpan)."""
     filename = (file.filename or "").lower()
     if not (filename.endswith(".csv") or filename.endswith(".txt")):
@@ -623,6 +1205,7 @@ async def import_staff_csv(
     file: UploadFile = File(...),
     mode: str = Form("replace"),
     source: str = Form("impor CSV"),
+    user: Dict[str, Any] = Depends(require_admin),
 ):
     """Baca CSV daftar staf lalu langsung menyinkronkan seluruh staf ke database."""
     if mode not in {"replace", "merge"}:
@@ -643,11 +1226,18 @@ async def import_staff_csv(
         tmp_path.unlink(missing_ok=True)
 
     rows = [
-        StaffImportRow(name=row["name"], bagian=row.get("bagian", ""), nip=row.get("nip", ""))
+        StaffImportRow(
+            name=row["name"],
+            bagian=row.get("bagian", ""),
+            nip=row.get("nip", ""),
+            role=row.get("role") or None,
+            supervised_departments=row.get("supervised_departments") or [],
+        )
         for row in parsed["rows"]
     ]
     result = await import_staff(
-        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor CSV"))
+        StaffImportRequest(rows=rows, mode=mode, source=source or (file.filename or "impor CSV")),
+        user=user,
     )
     result["parsed_rows"] = parsed["count"]
     result["with_nip"] = parsed["with_nip"]
@@ -657,12 +1247,17 @@ async def import_staff_csv(
 
 
 @api.put("/staff/{staff_id}", response_model=Staff)
-async def update_staff(staff_id: str, payload: StaffUpdate):
+async def update_staff(staff_id: str, payload: StaffUpdate, user: Dict[str, Any] = Depends(require_admin)):
     existing = await db.staff.find_one({"id": staff_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Staf tidak ditemukan")
 
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    removes_active_admin = existing.get("role") == "admin" and existing.get("active", True) and (
+        changes.get("role", "admin") != "admin" or changes.get("active") is False
+    )
+    if removes_active_admin and await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
+        raise HTTPException(400, "Promosikan atau aktifkan Admin lain sebelum menonaktifkan role Admin terakhir.")
     if "name" in changes:
         name = str(changes["name"]).strip()
         if not name:
@@ -672,47 +1267,97 @@ async def update_staff(staff_id: str, payload: StaffUpdate):
     if "department" in changes and changes["department"] not in DEPARTMENTS:
         raise HTTPException(400, "Departemen tidak valid")
     if "nip" in changes:
-        changes["nip"] = str(changes["nip"]).strip()
-        # Jenis nomor dihitung ulang dari panjang NIP/NIK kecuali dikirim eksplisit.
-        if "id_type" not in changes:
-            changes["id_type"] = infer_id_type(changes["nip"])
+        new_nip = normalize_identity(changes["nip"])
+        if new_nip and not valid_identity(new_nip):
+            raise HTTPException(400, "NIP harus 18 digit atau NIK 16 digit.")
+        duplicate = await db.staff.find_one({"nip": new_nip, "id": {"$ne": staff_id}}) if new_nip else None
+        if duplicate:
+            raise HTTPException(409, "NIP/NIK tersebut sudah digunakan.")
+        changes["nip"] = new_nip
+        changes["id_type"] = infer_id_type(new_nip)
+        if new_nip != normalize_identity(existing.get("nip", "")):
+            # Perubahan identitas harus diaktivasi ulang; sesi lama langsung dicabut.
+            changes["is_activated"] = False
+            changes["pin_hash"] = ""
+            changes["activation_code_hash"] = ""
+            changes["activation_code_expires_at"] = ""
+            await db.auth_sessions.delete_many({"staff_id": staff_id})
     if "id_type" in changes:
         changes["id_type"] = str(changes["id_type"]).strip()
     if "keterangan" in changes:
         changes["keterangan"] = str(changes["keterangan"]).strip()
     if "position" in changes:
         changes["position"] = str(changes["position"]).strip()
+    if "role" in changes:
+        role = normalize_role(changes["role"])
+        if role not in VALID_ROLES:
+            raise HTTPException(400, "Role tidak valid")
+        changes["role"] = role
+        if role not in SUPERVISOR_ROLES:
+            changes["supervised_departments"] = []
+    if "supervised_departments" in changes:
+        invalid_supervised = [dept for dept in changes["supervised_departments"] if dept not in DEPARTMENTS]
+        if invalid_supervised:
+            raise HTTPException(400, f"Departemen pengawasan tidak valid: {invalid_supervised[0]}")
+        supervised = valid_supervised_departments(changes["supervised_departments"])
+        if changes.get("role", existing.get("role", "staff")) not in SUPERVISOR_ROLES:
+            supervised = []
+        changes["supervised_departments"] = supervised
+    if changes.get("active") is False:
+        changes["is_activated"] = False
+        await db.auth_sessions.delete_many({"staff_id": staff_id})
 
     if changes:
         await db.staff.update_one({"id": staff_id}, {"$set": changes})
 
     fresh = await db.staff.find_one({"id": staff_id}, {"_id": 0})
-    return fresh
+    return public_staff(fresh, reveal_identity=True, reveal_account_status=True)
 
 
 @api.delete("/staff/{staff_id}")
-async def delete_staff(staff_id: str):
-    result = await db.staff.delete_one({"id": staff_id})
-    if not result.deleted_count:
+async def delete_staff(staff_id: str, user: Dict[str, Any] = Depends(require_admin)):
+    staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    if not staff:
         raise HTTPException(404, "Staf tidak ditemukan")
-    return {"ok": True}
+    if staff.get("role") == "admin" and staff.get("active", True) and staff.get("is_activated") and await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
+        raise HTTPException(400, "Admin aktif terakhir tidak dapat dihapus atau dinonaktifkan.")
+    await db.auth_sessions.delete_many({"staff_id": staff_id})
+    if await db.tasks.count_documents({"staff_id": staff_id}) > 0:
+        await db.staff.update_one(
+            {"id": staff_id},
+            {"$set": {"active": False, "is_activated": False, "archived": True, "archive_reason": "Dinonaktifkan oleh Admin"}},
+        )
+        return {"ok": True, "deactivated": True}
+    result = await db.staff.delete_one({"id": staff_id})
+    return {"ok": bool(result.deleted_count), "deactivated": False}
 
 
 @api.get("/tasks", response_model=List[Task])
-async def get_tasks():
+async def get_tasks(user: Dict[str, Any] = Depends(get_current_user)):
     await seed_data()
-    return await db.tasks.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    query = {} if is_report_manager(user) else {"staff_id": user["id"]}
+    return await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
 @api.post("/tasks", response_model=Task)
-async def create_task(payload: TaskCreate):
+async def create_task(payload: TaskCreate, user: Dict[str, Any] = Depends(get_current_user)):
     doc = payload.model_dump()
-    status = doc.get("status", "todo")
-    if status == "plan":
-        status = "todo"
-    
+    if user.get("role") == "staff":
+        target_staff_id = user["id"]
+    else:
+        target_staff_id = doc.get("staff_id", "")
+    target_staff = await db.staff.find_one({"id": target_staff_id}, {"_id": 0})
+    if not target_staff or not target_staff.get("active", True):
+        raise HTTPException(404, "Staf penanggung jawab tidak ditemukan atau tidak aktif.")
+    if not can_manage_staff_record(user, target_staff):
+        raise HTTPException(403, "Anda hanya dapat menginput laporan untuk staf yang Anda awasi.")
+    doc["staff_id"] = target_staff["id"]
+    status = normalize_task_status(doc.get("status", "todo"))
+    if status is None:
+        raise HTTPException(400, "Status laporan tidak valid.")
+
     # Validasi: Tugas baru wajib berstatus To Do List terlebih dahulu
-    if status in ["doing", "finish"]:
+    if status in {"doing", "finish"}:
         raise HTTPException(
             400,
             "Tugas baru wajib diinputkan ke status To Do List terlebih dahulu sebelum dapat diubah ke Doing atau Finish."
@@ -736,29 +1381,50 @@ async def create_task(payload: TaskCreate):
             }
         ]
 
-    doc.update({"id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()})
+    doc.update({
+        "id": str(uuid.uuid4()),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+        "updated_by": user["id"],
+    })
     await db.tasks.insert_one(doc)
     return doc
 
 
 @api.patch("/tasks/{task_id}", response_model=Task)
-async def update_task(task_id: str, payload: TaskCreate):
+async def update_task(task_id: str, payload: TaskCreate, user: Dict[str, Any] = Depends(get_current_user)):
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Tugas tidak ditemukan")
 
+    existing_staff = await db.staff.find_one({"id": existing.get("staff_id")}, {"_id": 0})
+    if not existing_staff or not can_manage_staff_record(user, existing_staff):
+        raise HTTPException(403, "Anda tidak berhak mengubah laporan staf ini.")
+    if normalize_task_status(existing.get("status")) == "finish" and user.get("role") != "admin":
+        raise HTTPException(403, "Laporan Finish terkunci. Hubungi Admin untuk koreksi.")
+
     doc = payload.model_dump()
-    new_status = doc.get("status", "todo")
-    if new_status == "plan":
-        new_status = "todo"
+    # Hanya Admin yang boleh memindahkan laporan ke staf lain. Pengguna lain
+    # tetap terikat pada pemilik laporan yang sudah tersimpan di server.
+    if user.get("role") != "admin":
+        doc["staff_id"] = existing["staff_id"]
+    else:
+        target_staff = await db.staff.find_one({"id": doc.get("staff_id")}, {"_id": 0})
+        if not target_staff:
+            raise HTTPException(404, "Staf penanggung jawab tidak ditemukan.")
+        if not target_staff.get("active", True) and target_staff.get("id") != existing.get("staff_id"):
+            raise HTTPException(404, "Laporan baru hanya dapat dipindahkan ke staf yang aktif.")
+    doc["updated_by"] = user["id"]
+    doc["updated_at"] = iso_utc(utc_now())
+    new_status = normalize_task_status(doc.get("status", "todo"))
+    if new_status is None:
+        raise HTTPException(400, "Status laporan tidak valid.")
     doc["status"] = new_status
 
-    old_status = existing.get("status", "todo")
-    if old_status == "plan":
-        old_status = "todo"
+    old_status = normalize_task_status(existing.get("status", "todo")) or "todo"
 
     # Validasi: Tugas tidak dapat diubah ke Doing atau Finish jika belum pernah diinputkan ke To Do List
-    has_todo = bool(existing.get("todo_at")) or (existing.get("status") in ["todo", "plan"]) or bool(doc.get("todo_at"))
+    has_todo = bool(existing.get("todo_at")) or old_status == "todo" or bool(doc.get("todo_at"))
     if not has_todo and new_status in ["doing", "finish"]:
         raise HTTPException(
             400,
@@ -817,7 +1483,15 @@ async def update_task(task_id: str, payload: TaskCreate):
 
 
 @api.delete("/tasks/{task_id}")
-async def delete_task(task_id: str):
+async def delete_task(task_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(404, "Tugas tidak ditemukan")
+    staff = await db.staff.find_one({"id": task.get("staff_id")}, {"_id": 0})
+    if not staff or not can_manage_staff_record(user, staff):
+        raise HTTPException(403, "Anda tidak berhak menghapus laporan staf ini.")
+    if normalize_task_status(task.get("status")) == "finish" and user.get("role") != "admin":
+        raise HTTPException(403, "Laporan Finish terkunci. Hubungi Admin untuk koreksi.")
     result = await db.tasks.delete_one({"id": task_id})
     if not result.deleted_count:
         raise HTTPException(404, "Tugas tidak ditemukan")
@@ -825,9 +1499,10 @@ async def delete_task(task_id: str):
 
 
 @api.get("/analytics")
-async def analytics():
+async def analytics(user: Dict[str, Any] = Depends(get_current_user)):
     await seed_data()
-    tasks = await db.tasks.find({}, {"_id": 0}).to_list(500)
+    task_query = {} if is_report_manager(user) else {"staff_id": user["id"]}
+    tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(500)
     for t in tasks:
         if t.get("status") == "plan":
             t["status"] = "todo"
@@ -842,7 +1517,8 @@ async def analytics():
     daily = [{"label": (now - timedelta(days=i)).strftime("%d %b"), "total": max(1, len(tasks) - i % 3), "finish": max(0, counts["finish"] - i % 2)} for i in range(6, -1, -1)]
     weekly = [{"label": f"Minggu {i}", "total": max(1, len(tasks) + i), "finish": max(0, counts["finish"] + i % 2)} for i in range(1, 5)]
     monthly = [{"label": (now - timedelta(days=30 * i)).strftime("%b"), "total": max(1, len(tasks) + i * 2), "finish": max(0, counts["finish"] + i)} for i in range(5, -1, -1)]
-    staff_rows = await db.staff.find({}, {"_id": 0}).to_list(500)
+    staff_query = {} if is_report_manager(user) else {"id": user["id"]}
+    staff_rows = await db.staff.find(staff_query, {"_id": 0}).to_list(500)
     staff_departments = {person["id"]: person.get("department", "") for person in staff_rows}
     departments = [{"name": department, "total": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department), "finish": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department and t["status"] == "finish")} for department in DEPARTMENTS]
     kpi_data = compute_kpi_metrics(tasks, staff_rows)
@@ -1091,7 +1767,7 @@ def compute_kpi_metrics(tasks, staff_rows):
 
 
 @api.post("/export")
-async def export_sheet():
+async def export_sheet(user: Dict[str, Any] = Depends(require_admin)):
     exported_at = datetime.now(ZoneInfo("Asia/Jakarta"))
     await db.export_logs.insert_one({"id": str(uuid.uuid4()), "mode": "manual", "status": "simulated", "exported_at": exported_at.isoformat(), "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"})
     return {"ok": True, "status": "simulated", "message": "Simulasi ekspor manual berhasil dicatat.", "exported_at": exported_at.isoformat(), "next_run": next_export_time().isoformat()}
@@ -1104,7 +1780,7 @@ def next_export_time():
 
 
 @api.get("/export/status")
-async def export_status():
+async def export_status(user: Dict[str, Any] = Depends(require_admin)):
     last = await db.export_logs.find_one({}, {"_id": 0}, sort=[("exported_at", -1)])
     return {"mode": "simulated", "schedule": "21:00", "timezone": "Asia/Jakarta", "spreadsheet_id": "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I", "last_export": last, "next_run": next_export_time().isoformat()}
 
@@ -1118,10 +1794,10 @@ async def scheduled_export_loop():
 
 
 @api.get("/database/status")
-async def database_status():
+async def database_status(user: Dict[str, Any] = Depends(require_admin)):
     """Informasi mode database aktif dan jumlah dokumen tersimpan."""
     await seed_data()
-    collections = ["staff", "tasks", "export_logs", "settings"]
+    collections = ["staff", "tasks", "auth_sessions", "export_logs", "settings"]
     counts = {}
     for name in collections:
         counts[name] = await db[name].count_documents({})
@@ -1139,12 +1815,33 @@ async def database_status():
 
 
 async def normalize_staff_identity():
-    """Pastikan jenis nomor (NIP/NIK) selalu konsisten dengan panjang NIP yang tersimpan."""
+    """Normalize legacy identity/role fields without activating any account."""
     fixed = 0
-    async for row in db.staff.find({}, {"_id": 0, "id": 1, "nip": 1, "id_type": 1}):
-        expected = infer_id_type(row.get("nip") or "")
-        if (row.get("id_type") or "") != expected:
-            await db.staff.update_one({"id": row["id"]}, {"$set": {"id_type": expected}})
+    async for row in db.staff.find(
+        {},
+        {"_id": 0, "id": 1, "nip": 1, "id_type": 1, "role": 1, "supervised_departments": 1, "active": 1},
+    ):
+        nip = normalize_identity(row.get("nip") or "")
+        role = normalize_role(row.get("role") or "staff")
+        if role not in VALID_ROLES:
+            role = "staff"
+        supervised = valid_supervised_departments(row.get("supervised_departments") or [])
+        if role not in SUPERVISOR_ROLES:
+            supervised = []
+        changes: Dict[str, Any] = {}
+        expected_id_type = infer_id_type(nip)
+        if (row.get("nip") or "") != nip:
+            changes["nip"] = nip
+        if (row.get("id_type") or "") != expected_id_type:
+            changes["id_type"] = expected_id_type
+        if row.get("role") != role:
+            changes["role"] = role
+        if row.get("supervised_departments") != supervised:
+            changes["supervised_departments"] = supervised
+        if "active" not in row:
+            changes["active"] = True
+        if changes:
+            await db.staff.update_one({"id": row["id"]}, {"$set": changes})
             fixed += 1
     return fixed
 
@@ -1167,7 +1864,19 @@ async def start_scheduler():
 
 
 app.include_router(api)
-app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
+# Credentialed cookies must never be exposed to arbitrary origins by default.
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip() and origin.strip() != "*"
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 @app.on_event("shutdown")

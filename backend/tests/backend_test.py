@@ -41,12 +41,23 @@ VALID_DEPARTMENTS = {
 }
 
 SPREADSHEET_ID = "1RVliN0kwubvYBmAoCYWrIJhV6wgT2RvW4XcTAxF--1I"
+TEST_ADMIN_NIP = os.environ.get("LOKA_TEST_ADMIN_NIP") or os.environ.get("TEST_ADMIN_NIP")
+TEST_ADMIN_PIN = os.environ.get("LOKA_TEST_ADMIN_PIN") or os.environ.get("TEST_ADMIN_PIN")
 
 
 @pytest.fixture
 def client():
+    if not TEST_ADMIN_NIP or not TEST_ADMIN_PIN:
+        pytest.skip("Set LOKA_TEST_ADMIN_NIP dan LOKA_TEST_ADMIN_PIN untuk menjalankan tes API integrasi.")
     with requests.Session() as session:
         session.headers.update({"Content-Type": "application/json"})
+        response = session.post(
+            f"{BASE_URL}/api/auth/login",
+            json={"nip": TEST_ADMIN_NIP, "pin": TEST_ADMIN_PIN},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            pytest.skip(f"Akun Admin integrasi tidak dapat login: HTTP {response.status_code}")
         yield session
 
 

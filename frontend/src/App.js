@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle, ArrowRight, Award, BarChart3, Building2, Calendar, Camera, CheckCircle2, ClipboardList, Clock, Download, FileSpreadsheet, FileText,
-  HeartHandshake, History, Home, Layers, LayoutDashboard, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
+  HeartHandshake, History, Home, KeyRound, Layers, LayoutDashboard, LockKeyhole, LogOut, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import "@/App.css";
 import LandingPage from "@/components/LandingPage";
+import AuthModal from "@/components/AuthModal";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
+axios.defaults.withCredentials = true;
 const columns = [
   { key: "todo", label: "To Do List", color: "blue", hint: "Daftar rencana tugas yang akan dikerjakan" },
   { key: "doing", label: "Doing", color: "amber", hint: "Sedang dikerjakan" },
@@ -19,6 +21,14 @@ const departments = [
   "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum",
   "Sarana & Prasarana", "Clinical Supervisor",
 ];
+const staffRoles = [
+  { id: "staff", label: "Staf" },
+  { id: "admin", label: "Admin" },
+  { id: "team_lead", label: "Ketua Tim" },
+  { id: "clinical_supervisor", label: "Clinical Supervisor" },
+  { id: "head", label: "Kepala" },
+];
+const supervisorRoleIds = ["team_lead", "clinical_supervisor", "head"];
 const currentDate = () =>
   new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
 
@@ -134,7 +144,7 @@ function Avatar({ name }) {
   );
 }
 
-function TaskCard({ task, staff, onEdit, onTransition }) {
+function TaskCard({ task, staff, onEdit, onTransition, canEdit = false }) {
   const person = staff.find((s) => s.id === task.staff_id);
   const normalizedStatus = task.status === "plan" ? "todo" : (task.status || "todo");
 
@@ -149,16 +159,17 @@ function TaskCard({ task, staff, onEdit, onTransition }) {
 
   return (
     <div
-      className="task-card"
+      className={canEdit ? "task-card task-card-editable" : "task-card task-card-readonly"}
       data-testid={`task-card-${task.id}`}
-      onClick={() => onEdit(task)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onEdit(task); }}
+      onClick={canEdit ? () => onEdit(task) : undefined}
+      role={canEdit ? "button" : undefined}
+      tabIndex={canEdit ? 0 : -1}
+      aria-disabled={!canEdit}
+      onKeyDown={(e) => { if (canEdit && (e.key === "Enter" || e.key === " ")) onEdit(task); }}
     >
       <div className="task-top">
         <span className={`priority ${task.priority.toLowerCase()}`}>{task.priority}</span>
-        <span className="task-menu">{task.photo_data ? <Camera size={14} /> : "•••"}</span>
+        <span className="task-menu">{!canEdit ? <LockKeyhole size={14} title="Laporan terkunci atau di luar cakupan Anda" /> : task.photo_data ? <Camera size={14} /> : "•••"}</span>
       </div>
       <strong data-testid="task-title">{task.title}</strong>
 
@@ -422,7 +433,7 @@ function StatusTransitionModal({ transitionData, staff, onClose, onConfirm }) {
   );
 }
 
-function TaskModal({ task, staff, onClose, onSave }) {
+function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }) {
   const isEditing = Boolean(task?.id);
   const nowInput = toDateTimeInput(new Date());
 
@@ -716,7 +727,7 @@ function TaskModal({ task, staff, onClose, onSave }) {
             </button>
           </div>
 
-          <label>Penanggung jawab<select data-testid="task-staff-select" name="staff_id" value={form.staff_id} onChange={change}>{staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.department}</option>)}</select></label>
+          <label>Penanggung jawab<select data-testid="task-staff-select" name="staff_id" value={form.staff_id} onChange={change} disabled={!allowStaffSelection}>{staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.department}</option>)}</select></label>
           <label>
             Status
             {isEditing ? (
@@ -864,8 +875,19 @@ function StaffModal({ staff, onClose, onSave }) {
     id_type: staff?.id_type || "",
     keterangan: staff?.keterangan || "",
     position: staff?.position || "",
+    active: staff?.active ?? true,
+    role: staff?.role || "staff",
+    supervised_departments: staff?.supervised_departments || [],
   });
   const effectiveIdType = form.id_type || inferIdType(form.nip);
+  const toggleSupervisedDepartment = (department) => {
+    setForm((current) => ({
+      ...current,
+      supervised_departments: current.supervised_departments.includes(department)
+        ? current.supervised_departments.filter((value) => value !== department)
+        : [...current.supervised_departments, department],
+    }));
+  };
   const submit = () => {
     if (!form.name.trim()) {
       toast.error("Nama staf wajib diisi");
@@ -893,6 +915,24 @@ function StaffModal({ staff, onClose, onSave }) {
           </select></label>
           <label className="full">Keterangan (jabatan / instalasi / bagian)<input data-testid="staff-keterangan-input" value={form.keterangan} onChange={(e) => setForm({ ...form, keterangan: e.target.value })} placeholder="Contoh: Perawat Pelaksana · Instalasi Detoksifikasi" /></label>
           <label className="full">Departemen<select data-testid="staff-department-select" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>{departments.map((d) => <option key={d}>{d}</option>)}</select></label>
+          <label className="full">Peran akun<select data-testid="staff-role-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, supervised_departments: supervisorRoleIds.includes(e.target.value) ? form.supervised_departments : [] })}>{staffRoles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}</select></label>
+          {supervisorRoleIds.includes(form.role) && (
+            <fieldset className="supervised-department-field full">
+              <legend>Departemen yang diawasi</legend>
+              <div className="supervised-department-grid">
+                {departments.map((department) => (
+                  <label key={department}>
+                    <input type="checkbox" checked={form.supervised_departments.includes(department)} onChange={() => toggleSupervisedDepartment(department)} />
+                    <span>{department}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          <label className="active-account-field full">
+            <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
+            <span>Akun aktif dan dapat masuk menggunakan PIN</span>
+          </label>
         </div>
         <div className="modal-actions">
           <button className="secondary-btn" data-testid="staff-cancel-button" onClick={onClose}>Batal</button>
@@ -1031,8 +1071,8 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
           <button className="icon-button" data-testid="staff-import-close" onClick={onClose}><X size={18} /></button>
         </div>
         <p className="modal-subtitle">
-          Unggah berkas <b>DATA STAF</b> (.pdf atau .csv) — kolom nama, NIP/NIK, dan keterangan jabatan dibaca otomatis,
-          lalu seluruh daftar staf diperbarui sekaligus. Pemisah koma, titik-koma (Excel), tab, atau pipa dikenali otomatis.
+          Unggah berkas <b>DATA STAF</b> (.pdf atau .csv) — nama, NIP/NIK, keterangan, role, dan departemen yang diawasi dapat dibaca dari CSV,
+          lalu daftar diperbarui sekaligus. Pastikan role Admin pertama sudah tercantum sebelum bootstrap. Pemisah koma, titik-koma, tab, atau pipa dikenali otomatis.
           Bisa juga dengan menempelkan teksnya pada kolom di bawah.
         </p>
 
@@ -1062,7 +1102,7 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
               <button className="text-btn" onClick={resetFile}><X size={14} /> Bersihkan</button>
             </div>
             <div className="import-preview">
-              <div className="import-preview-head"><span>Nama</span><span>NIP/NIK</span><span>Keterangan</span></div>
+              <div className="import-preview-head"><span>Nama</span><span>NIP/NIK</span><span>Role / keterangan</span><span>Departemen diawasi</span></div>
               {fileRows.slice(0, 8).map((row, idx) => (
                 <div className="import-preview-row" key={`${row.name}-${idx}`}>
                   <span>{row.name}</span>
@@ -1070,7 +1110,8 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
                     <span className={`id-badge ${(inferIdType(row.nip) || "unknown").toLowerCase()}`}>{inferIdType(row.nip) || "—"}</span>{" "}
                     {row.nip || "—"}
                   </span>
-                  <span>{row.bagian || "—"}</span>
+                  <span>{row.role ? `${staffRoles.find((item) => item.id === row.role)?.label || row.role} · ` : ""}{row.bagian || "—"}</span>
+                  <span>{(row.supervised_departments || []).join(", ") || "—"}</span>
                 </div>
               ))}
               {fileRows.length > 8 && (
@@ -1326,7 +1367,7 @@ function Metric({ label, value, detail, icon: Icon, tone }) {
   );
 }
 
-function Overview({ analytics, tasks, staffCount, onGo, onCreate }) {
+function Overview({ analytics, tasks, staffCount, onGo, onCreate, canCreateReports }) {
   const counts = analytics.counts || {};
   const percentages = analytics.percentages || {};
   const todoCount = counts.todo ?? counts.plan ?? 0;
@@ -1338,7 +1379,7 @@ function Overview({ analytics, tasks, staffCount, onGo, onCreate }) {
       <PageIntro
         title="Tabik Pun Staf Loka Rehabilitasi Narkotika Kalianda"
         desc="Berikut ringkasan kinerja tim untuk hari ini."
-        action={<button className="primary-btn" data-testid="overview-add-button" onClick={onCreate}><Plus size={17} /> Buat laporan</button>}
+        action={canCreateReports && <button className="primary-btn" data-testid="overview-add-button" onClick={onCreate}><Plus size={17} /> Buat laporan</button>}
       />
       <div className="metric-grid">
         <Metric label="Total laporan" value={analytics.total_tasks || tasks.length} detail="Laporan aktif hari ini" icon={ClipboardList} tone="blue" />
@@ -1385,7 +1426,7 @@ function Overview({ analytics, tasks, staffCount, onGo, onCreate }) {
   );
 }
 
-function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport }) {
+function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCode }) {
   const [query, setQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const needle = query.trim().toLowerCase();
@@ -1437,7 +1478,7 @@ function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport }) {
           <div className="staff-row staff-grid" data-testid={`staff-row-${s.id}`} key={s.id}>
             <div className="staff-name">
               <Avatar name={s.name} />
-              <span><strong>{s.name}</strong><small>ID · {s.id.replace("staff-", "LK-")}</small></span>
+              <span><strong>{s.name}</strong><small>{staffRoles.find((role) => role.id === s.role)?.label || "Staf"} · ID {s.id.replace("staff-", "LK-")}</small></span>
             </div>
             <div className="staff-id" data-testid={`staff-id-${s.id}`}>
               <span className={`id-badge ${s.id_type ? s.id_type.toLowerCase() : "unknown"}`}>{staffIdLabel(s)}</span>
@@ -1446,10 +1487,16 @@ function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport }) {
             <span className="staff-note" title={staffKeterangan(s)}>{staffKeterangan(s)}</span>
             <span>{s.department}</span>
             <b>{tasks.filter((t) => t.staff_id === s.id).length} laporan</b>
-            {s.active === false
-              ? <span className="inactive-pill" title={s.archive_reason || "Tidak ada pada daftar staf terbaru"}><i /> Nonaktif</span>
-              : <span className="active-pill"><i /> Aktif</span>}
+            <div className="staff-status-cell">
+              {s.active === false
+                ? <span className="inactive-pill" title={s.archive_reason || "Tidak ada pada daftar staf terbaru"}><i /> Nonaktif</span>
+                : <span className="active-pill"><i /> Aktif</span>}
+              <small className={s.is_activated ? "pin-active" : "pin-pending"}>{s.is_activated ? "PIN aktif" : "Belum aktivasi"}</small>
+            </div>
             <div className="row-actions">
+              <button className="activation-staff" data-testid={`activation-code-${s.id}`} disabled={!s.nip || s.active === false} title={s.active === false ? "Aktifkan data staf terlebih dahulu" : s.is_activated ? "Terbitkan kode reset PIN" : "Terbitkan kode aktivasi"} onClick={() => onIssueCode(s)}>
+                <KeyRound size={14} /> Kode
+              </button>
               <button className="edit-staff" data-testid={`edit-staff-${s.id}`} onClick={() => onEdit(s)}>
                 <Pencil size={15} /> Ubah
               </button>
@@ -1744,6 +1791,9 @@ function Analytics({ analytics }) {
 }
 
 export default function App() {
+  const [authUser, setAuthUser] = useState(null);
+  const [authModal, setAuthModal] = useState(null);
+  const [activationResult, setActivationResult] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [staff, setStaff] = useState([]);
   const [analytics, setAnalytics] = useState({
@@ -1761,27 +1811,77 @@ export default function App() {
   const [selectedStaff, setSelectedStaff] = useState("all");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("loka-kin-theme") === "dark");
-  const initialLoadStarted = useRef(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!authUser) return;
     try {
       const [t, s, a] = await Promise.all([
         axios.get(`${API}/tasks`), axios.get(`${API}/staff`), axios.get(`${API}/analytics`),
       ]);
       setTasks(t.data); setStaff(s.data); setAnalytics(a.data);
-    } catch { toast.error("Data belum dapat dimuat"); }
-  };
+    } catch (error) {
+      if (error.response?.status === 401) {
+        setAuthUser(null);
+        setActive("home");
+        setTasks([]); setStaff([]);
+      } else {
+        toast.error("Data belum dapat dimuat");
+      }
+    }
+  }, [authUser]);
   useEffect(() => {
-    // React StrictMode memanggil effect mount dua kali pada development.
-    // Guard ini menjaga fetch awal tetap tunggal agar kartu dashboard tidak berkedip.
-    if (initialLoadStarted.current) return;
-    initialLoadStarted.current = true;
-    load();
+    let alive = true;
+    axios.get(`${API}/auth/me`)
+      .then(({ data }) => {
+        if (!alive) return;
+        setAuthUser(data);
+        setActive("overview");
+      })
+      .catch(() => {});
+    return () => { alive = false; };
   }, []);
+  useEffect(() => {
+    if (authUser) load();
+  }, [authUser, load]);
   useEffect(() => {
     document.body.classList.toggle("dark-mode", dark);
     localStorage.setItem("loka-kin-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  const isAdmin = authUser?.role === "admin";
+  const isSupervisor = ["team_lead", "clinical_supervisor", "head"].includes(authUser?.role);
+  const supervisedDepartments = authUser?.supervised_departments || [];
+  const roleLabels = { staff: "Staf", admin: "Admin", team_lead: "Ketua Tim", clinical_supervisor: "Clinical Supervisor", head: "Kepala" };
+  const assignableStaff = isAdmin
+    ? staff.filter((person) => person.active !== false)
+    : isSupervisor
+      ? staff.filter((person) => supervisedDepartments.includes(person.department) && person.active !== false)
+      : staff.filter((person) => person.id === authUser?.id);
+  const canCreateReports = (authUser?.role === "staff" || isAdmin || (isSupervisor && supervisedDepartments.length > 0)) && assignableStaff.length > 0;
+  const canEditTask = (task) => {
+    if (isAdmin) return true;
+    if (task.status === "finish") return false;
+    const person = staff.find((candidate) => candidate.id === task.staff_id);
+    if (!person || person.active === false) return false;
+    if (authUser?.role === "staff") return person.id === authUser.id;
+    return isSupervisor && supervisedDepartments.includes(person.department);
+  };
+  const completeLogin = (user) => {
+    setAuthUser(user);
+    setAuthModal(null);
+    setActive("overview");
+    setSelectedStaff("all");
+    toast.success(`Selamat datang, ${user.name}`);
+  };
+  const logout = async () => {
+    try { await axios.post(`${API}/auth/logout`); } catch { /* sesi tetap dihapus dari UI */ }
+    setAuthUser(null);
+    setTasks([]); setStaff([]);
+    setActive("home");
+    setSelectedStaff("all");
+    setModal(null); setTransitionModal(null);
+    toast.success("Anda telah keluar.");
+  };
 
   const filtered = useMemo(
     () => tasks.filter((t) =>
@@ -1835,6 +1935,9 @@ export default function App() {
       id_type: form.id_type || inferIdType(form.nip),
       keterangan: form.keterangan || "",
       position: form.position || "",
+      active: form.active !== false,
+      role: form.role || "staff",
+      supervised_departments: form.supervised_departments || [],
     };
     try {
       if (isEdit) {
@@ -1880,10 +1983,25 @@ export default function App() {
   const deleteStaff = async (person) => {
     if (!window.confirm(`Hapus staf ${person.name}?`)) return;
     try {
-      await axios.delete(`${API}/staff/${person.id}`);
-      setStaff((prev) => prev.filter((s) => s.id !== person.id));
-      toast.success("Staf berhasil dihapus");
+      const response = await axios.delete(`${API}/staff/${person.id}`);
+      if (response.data.deactivated) {
+        setStaff((prev) => prev.map((row) => row.id === person.id ? { ...row, active: false, is_activated: false } : row));
+        toast.success("Staf dinonaktifkan agar riwayat laporan tetap terjaga");
+      } else {
+        setStaff((prev) => prev.filter((row) => row.id !== person.id));
+        toast.success("Staf berhasil dihapus");
+      }
     } catch { toast.error("Gagal menghapus staf"); }
+  };
+  const issueActivationCode = async (person) => {
+    if (!person.nip) return toast.error("Isi NIP/NIK sebelum menerbitkan kode aktivasi.");
+    try {
+      const response = await axios.post(`${API}/auth/staff/${person.id}/activation-code`);
+      setActivationResult(response.data);
+      if (person.id !== authUser?.id) await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Kode aktivasi gagal diterbitkan.");
+    }
   };
 
   const handleConfirmTransition = async ({ task, nextStatus, realTarget, transitionTime, note }) => {
@@ -2307,17 +2425,22 @@ export default function App() {
     { id: "home", label: "Home", icon: Home },
     { id: "overview", label: "Ringkasan", icon: LayoutDashboard },
     { id: "board", label: "Laporan harian", icon: ClipboardList },
-    { id: "staff", label: "Daftar staf", icon: Users },
+    ...(isAdmin ? [{ id: "staff", label: "Daftar staf", icon: Users }] : []),
     { id: "analytics", label: "Analitik", icon: BarChart3 },
   ];
   const today = currentDate();
+  const retainedInactiveAssignee = modal?.id && isAdmin ? staff.find((person) => person.id === modal.staff_id) : null;
+  const taskModalStaff = retainedInactiveAssignee && !assignableStaff.some((person) => person.id === retainedInactiveAssignee.id)
+    ? [...assignableStaff, retainedInactiveAssignee]
+    : assignableStaff;
   const go = (id) => { setActive(id); setMobileOpen(false); };
 
   if (active === "home") {
     return (
       <>
         <Toaster position="top-right" />
-        <LandingPage onNavigateToDashboard={() => go("overview")} />
+        <LandingPage authenticated={Boolean(authUser)} onLogin={() => authUser ? go("overview") : setAuthModal("login")} />
+        {authModal && <AuthModal mode={authModal} onModeChange={setAuthModal} onClose={() => setAuthModal(null)} onAuthenticated={completeLogin} />}
       </>
     );
   }
@@ -2356,6 +2479,11 @@ export default function App() {
           <div className="breadcrumb">LOKA-Kin <span>/</span> {nav.find((n) => n.id === active)?.label}</div>
           <div className="top-actions">
             <span className="today" data-testid="today-label">{today}</span>
+            <div className="current-user-badge" data-testid="current-user-badge">
+              <span className="current-user-avatar">{authUser?.name?.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+              <span><b>{authUser?.name}</b><small>{roleLabels[authUser?.role] || "Pengguna"}</small></span>
+            </div>
+            <button className="logout-btn" data-testid="logout-button" onClick={logout} title="Keluar"><LogOut size={16} /><span>Keluar</span></button>
             <button className="export-btn" data-testid="export-excel-button" onClick={() => setExportMode("excel")}><FileSpreadsheet size={16} /> Excel</button>
             <button className="export-btn" data-testid="export-pdf-button" onClick={() => setExportMode("pdf")}><FileText size={16} /> PDF</button>
             <button className="theme-toggle" data-testid="theme-toggle-button" onClick={() => setDark(!dark)}>
@@ -2371,19 +2499,20 @@ export default function App() {
               tasks={tasks}
               staffCount={analytics.total_staff || staff.length}
               onGo={() => go("board")}
+              canCreateReports={canCreateReports}
               onCreate={() => { setActive("board"); setModal({ status: "todo" }); }}
             />
           )}
           {active === "board" && (
             <>
-              <PageIntro title="Laporan harian" desc="Pantau progres pekerjaan tim dalam satu ruang kerja."
-                action={<button className="primary-btn" data-testid="add-task-button" onClick={() => setModal({})}><Plus size={17} /> Tambah laporan</button>} />
+              <PageIntro title="Laporan harian" desc={authUser?.role === "staff" ? "Lihat dan kelola laporan kinerja harian Anda sendiri." : "Pantau laporan tim dan input laporan pada departemen yang menjadi tanggung jawab Anda."}
+                action={canCreateReports && <button className="primary-btn" data-testid="add-task-button" onClick={() => setModal({})}><Plus size={17} /> Tambah laporan</button>} />
               <div className="toolbar">
                 <div className="search"><Search size={17} /><input data-testid="task-search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari laporan..." /></div>
-                <select className="filter" data-testid="staff-filter-select" value={selectedStaff} onChange={(e) => setSelectedStaff(e.target.value)}>
+                {(isAdmin || isSupervisor) && <select className="filter" data-testid="staff-filter-select" value={selectedStaff} onChange={(e) => setSelectedStaff(e.target.value)}>
                   <option value="all">Semua staf</option>
                   {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                </select>}
                 <span className="result-count" data-testid="task-count">{filtered.length} laporan aktif</span>
               </div>
               <div className="kanban">
@@ -2404,8 +2533,9 @@ export default function App() {
                           <button
                             className="add-column"
                             data-testid={`add-${col.key}-button`}
-                            title="Tambah laporan ke To Do List"
-                            onClick={() => setModal({ status: "todo" })}
+                            title={canCreateReports ? "Tambah laporan ke To Do List" : "Anda tidak memiliki hak untuk menambah laporan"}
+                            disabled={!canCreateReports}
+                            onClick={() => canCreateReports && setModal({ status: "todo" })}
                           >
                             <Plus size={17} />
                           </button>
@@ -2413,8 +2543,10 @@ export default function App() {
                           <button
                             className="add-column disabled-column-add"
                             data-testid={`add-${col.key}-button`}
-                            title="Laporan harian baru wajib dimasukkan ke To Do List terlebih dahulu"
+                            title={canCreateReports ? "Laporan baru wajib dimasukkan ke To Do List terlebih dahulu" : "Anda tidak memiliki hak untuk menambah laporan"}
+                            disabled={!canCreateReports}
                             onClick={() => {
+                              if (!canCreateReports) return;
                               toast.info(`Laporan baru harus diinputkan ke To Do List terlebih dahulu sebelum dapat diubah ke ${col.label}.`);
                               setModal({ status: "todo" });
                             }}
@@ -2429,7 +2561,8 @@ export default function App() {
                             task={t}
                             staff={staff}
                             onEdit={setModal}
-                            onTransition={(tsk, nextSt) => setTransitionModal({ task: tsk, nextStatus: nextSt })}
+                            canEdit={canEditTask(t)}
+                            onTransition={canEditTask(t) ? (tsk, nextSt) => setTransitionModal({ task: tsk, nextStatus: nextSt }) : null}
                             key={t.id}
                           />
                         ))}
@@ -2449,6 +2582,7 @@ export default function App() {
               onEdit={(person) => setModal({ staffModal: true, staff: person })}
               onDelete={deleteStaff}
               onImport={() => setImportOpen(true)}
+              onIssueCode={issueActivationCode}
             />
           )}
           {active === "analytics" && <Analytics analytics={analytics} />}
@@ -2457,7 +2591,7 @@ export default function App() {
       {importOpen && <StaffImportModal onClose={() => setImportOpen(false)} onConfirm={importStaff} onResetRoster={resetRoster} />}
       {modal?.staffModal
         ? <StaffModal staff={modal.staff} onClose={() => setModal(null)} onSave={saveStaff} />
-        : modal && <TaskModal task={modal.id ? modal : null} staff={staff} onClose={() => setModal(null)} onSave={save} />}
+        : modal && <TaskModal task={modal.id ? modal : null} staff={taskModalStaff} allowStaffSelection={isAdmin} onClose={() => setModal(null)} onSave={save} />}
       {transitionModal && (
         <StatusTransitionModal
           transitionData={transitionModal}
@@ -2468,6 +2602,24 @@ export default function App() {
       )}
       {exportMode && <ExportDialog mode={exportMode} staff={staff} onClose={() => setExportMode(null)} onConfirm={handleExportConfirm} />}
       {pdfPreview && <PdfPreviewModal preview={pdfPreview} onClose={() => setPdfPreview(null)} />}
+      {activationResult && (
+        <div className="modal-backdrop" data-testid="activation-code-dialog">
+          <div className="modal activation-code-modal">
+            <div className="modal-head">
+              <div><span className="eyebrow">AKTIVASI / RESET PIN</span><h2>Kode sekali pakai</h2></div>
+              <button className="icon-button" onClick={() => setActivationResult(null)} aria-label="Tutup"><X size={18} /></button>
+            </div>
+            <p className="modal-subtitle">Berikan kode ini langsung kepada <b>{activationResult.name}</b>. Kode hanya ditampilkan sekarang dan PIN lama sudah dinonaktifkan.</p>
+            <code className="activation-code-value">{activationResult.activation_code}</code>
+            <p className="auth-hint">Berlaku hingga {new Date(activationResult.expires_at).toLocaleString("id-ID")}.</p>
+            <div className="modal-actions">
+              <button className="secondary-btn" onClick={() => setActivationResult(null)}>Tutup</button>
+              <button className="primary-btn" onClick={() => navigator.clipboard?.writeText(activationResult.activation_code)}>Salin kode</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {authModal && <AuthModal mode={authModal} onModeChange={setAuthModal} onClose={() => setAuthModal(null)} onAuthenticated={completeLogin} />}
     </div>
   );
 }

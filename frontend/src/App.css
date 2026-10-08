@@ -292,7 +292,7 @@ nav{display:grid;gap:5px}
 .pdf-result-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;background:var(--surface-2);font-size:11px;color:var(--muted)}
 .pdf-result-head b{color:var(--ink)}
 .import-preview{max-height:230px;overflow:auto}
-.import-preview-head,.import-preview-row{display:grid;grid-template-columns:1.5fr 1.2fr 1.1fr;gap:10px;padding:9px 14px;font-size:11px}
+.import-preview-head,.import-preview-row{display:grid;grid-template-columns:1.35fr 1.1fr 1.1fr 1.2fr;gap:10px;padding:9px 14px;font-size:11px}
 .import-preview-head{background:var(--surface-2);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-size:9.5px;font-weight:700}
 .import-preview-row{border-top:1px solid var(--line);color:var(--ink);align-items:center}
 .import-preview-row>span:nth-child(2){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px}
@@ -620,3 +620,33 @@ nav{display:grid;gap:5px}
   .staff-toolbar .result-count{margin-left:0}
   .department-grid{grid-template-columns:1fr}
 }
+
+/* Role, department supervision and account activation controls */
+.staff-status-cell{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.pin-active,.pin-pending{font-size:9.5px;font-weight:650;color:#16815c}
+.pin-pending{color:#a66b11}
+.activation-staff{border:1px solid #b9d7cf;background:#f0faf7;color:#167555;border-radius:6px;padding:7px 8px;display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:750;white-space:nowrap}
+.activation-staff:hover{background:#dff5ee}
+.activation-staff:disabled{opacity:.5;cursor:not-allowed}
+.supervised-department-field{margin:0;padding:13px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}
+.supervised-department-field legend{padding:0 6px;font-size:11px;font-weight:800;color:var(--ink)}
+.supervised-department-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.supervised-department-grid label{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:550;cursor:pointer}
+.supervised-department-grid input{width:auto;margin:0;accent-color:#4268dc}
+.task-card-readonly{cursor:default}
+.task-card-readonly:hover{transform:none;box-shadow:0 2px 4px #14233b05;border-color:var(--line)}
+@media(max-width:720px){.row-actions{flex-wrap:wrap}.supervised-department-grid{grid-template-columns:1fr}}
+.current-user-badge{display:flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid var(--line);border-radius:9px;background:var(--surface);min-width:0}
+.current-user-avatar{display:grid;place-items:center;width:29px;height:29px;flex:none;border-radius:50%;background:#e4ebff;color:#425fc2;font-size:9px;font-weight:850}
+.current-user-badge>span:last-child{display:grid;gap:2px;min-width:0}
+.current-user-badge b{font-size:10.5px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.current-user-badge small{font-size:9px;color:var(--muted)}
+.logout-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid #f0cccc;border-radius:8px;background:#fff7f7;color:#b64a4a;padding:8px 10px;font-size:10.5px;font-weight:750;white-space:nowrap}
+.logout-btn:hover{background:#feecec}
+.activation-code-modal{max-width:500px}
+.activation-code-value{display:block;margin:18px 0 10px;padding:18px 10px;border:1px dashed #81b9a0;border-radius:9px;background:#f3fbf7;color:#14583b;text-align:center;font-size:24px;font-weight:850;letter-spacing:2px}
+@media(max-width:760px){.current-user-badge{display:none}.logout-btn span{display:none}.logout-btn{padding:8px}.top-actions{gap:7px}}
+.dark-mode .current-user-badge{background:var(--surface)}.dark-mode .activation-code-value{background:#102a21;color:#8fe0b5;border-color:#43866a}.dark-mode .logout-btn{background:#321e24;border-color:#65383c;color:#ffa7a7}
+.active-account-field{display:flex;align-items:center;gap:9px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink)!important;cursor:pointer}
+.active-account-field input{width:16px!important;height:16px;margin:0!important;accent-color:#4268dc}
+.active-account-field span{font-size:11px;font-weight:700}
