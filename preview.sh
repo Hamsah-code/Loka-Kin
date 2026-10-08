@@ -18,7 +18,8 @@ if [ ! -d .venv ]; then
 fi
 .venv/bin/pip install --quiet --disable-pip-version-check \
   "fastapi==0.110.1" "uvicorn==0.25.0" "motor==3.3.1" "mongomock-motor==0.0.20" \
-  "pydantic>=2.6.4" "python-dotenv>=1.0.1" "pymongo==4.6.3"
+  "pydantic>=2.6.4" "python-dotenv>=1.0.1" "pymongo==4.6.3" \
+  "pdfplumber>=0.11.0" "python-multipart>=0.0.9" "tzdata>=2024.2" "requests>=2.31.0"
 
 # --- Frontend: dependensi npm ----------------------------------------------
 if [ ! -d frontend/node_modules ]; then
