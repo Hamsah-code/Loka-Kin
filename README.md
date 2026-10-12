@@ -31,6 +31,7 @@ Jangan masukkan PIN ke spreadsheet. Kode aktivasi berlaku 24 jam dan hanya ditam
 - Staf hanya dapat membaca dan mengelola laporan akun sendiri; API mengikat `staff_id` ke sesi pengguna.
 - Ketua Tim, Clinical Supervisor, dan Kepala dapat membaca seluruh laporan, tetapi hanya dapat membuat atau mengubah laporan di departemen yang ditetapkan Admin.
 - Laporan `Finish` terkunci untuk Staf dan pimpinan. Admin dapat melakukan koreksi.
+- Ekspor PDF/Excel mengikuti peran: Staf langsung diekspor untuk laporan akunnya sendiri tanpa memilih staf, sedangkan Admin, Ketua Tim, Clinical Supervisor, dan Kepala dapat memilih seluruh staf atau satu staf untuk pemantauan.
 - Admin mengelola roster, role, pemetaan departemen, aktivasi/reset, dan seluruh laporan.
 
 Tes otorisasi terisolasi tersedia di `backend/tests/test_auth_access.py`. Tes API integrasi terhadap server aktif pada `backend/tests/backend_test.py` memerlukan `LOKA_TEST_ADMIN_NIP` dan `LOKA_TEST_ADMIN_PIN`.

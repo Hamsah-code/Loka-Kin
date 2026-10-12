@@ -87,3 +87,8 @@ LOKA-Kin adalah website laporan kinerja harian untuk staf Loka Rehabilitasi Nark
   - Tab navigasi filter bagian (`Semua Bagian`, `Umum`, `Medis`, `Sosial`).
   - Kartu eksekutif KPI per bagian dengan skor mutu keseluruhan (%), target standar, progres visual bar, jumlah staf aktif, dan badge kategori mutu (`Sangat Baik [A]`, `Baik [B]`, dll.).
   - Tabel rincian indikator mutu lengkap dengan kode indikator, bobot, target standar, realisasi laporan, tingkat ketercapaian, dan status mutu (`Target Tercapai`, `Mendekati Target`, `Perlu Perhatian`).
+
+### Ekspor Otomatis per Akun & Monitoring Pimpinan (2026-10-12)
+- **Ekspor PDF/Excel otomatis untuk Staf**: Saat role **Staf** membuka dialog ekspor, pemilih staf tidak lagi ditampilkan. Dokumen langsung dibuat untuk akun yang sedang masuk (kolom terkunci menampilkan nama & departemen staf tersebut), sehingga tidak ada lagi langkah "pilih laporan per staf".
+- **Monitoring seluruh staf untuk pimpinan**: Role **Admin**, **Ketua Tim**, **Clinical Supervisor**, dan **Kepala** tetap memakai pemilih staf (opsi "Semua Staf (Laporan per Staf)" maupun staf tertentu) agar dapat memantau dan mencetak laporan seluruh staf.
+- **Pengaman ganda**: `handleExportConfirm` memaksa `staff_id` ke akun pemilik sesi ketika role-nya Staf, dan API `/api/tasks` hanya mengembalikan laporan milik staf tersebut, sehingga dokumen tidak dapat memuat laporan staf lain.

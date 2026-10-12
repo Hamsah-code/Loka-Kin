@@ -1165,17 +1165,20 @@ function StaffImportModal({ onClose, onConfirm, onResetRoster }) {
   );
 }
 
-function ExportDialog({ mode, staff, onClose, onConfirm }) {
+function ExportDialog({ mode, staff, lockedStaffId = null, onClose, onConfirm }) {
   const [period, setPeriod] = useState("harian");
   const [refDate, setRefDate] = useState(toDateInput(new Date()));
-  const [staffId, setStaffId] = useState("all");
+  const [staffId, setStaffId] = useState(lockedStaffId || "all");
   const { label } = useMemo(() => computeRange(period, refDate), [period, refDate]);
   const periods = [
     { key: "harian", label: "Harian", hint: "Laporan tanggal terpilih" },
     { key: "mingguan", label: "Mingguan", hint: "Senin – Minggu di pekan tanggal terpilih" },
     { key: "bulanan", label: "Bulanan", hint: "Seluruh laporan pada bulan tanggal terpilih" },
   ];
-  const selectedStaffObj = staff.find((s) => s.id === staffId);
+  // Staf biasa terkunci ke laporannya sendiri; pimpinan & Admin bebas memilih.
+  const isLockedToSelf = Boolean(lockedStaffId);
+  const lockedStaffObj = lockedStaffId ? staff.find((s) => s.id === lockedStaffId) : null;
+  const selectedStaffObj = isLockedToSelf ? lockedStaffObj : staff.find((s) => s.id === staffId);
 
   return (
     <div className="modal-backdrop" data-testid="export-dialog">
@@ -1183,7 +1186,7 @@ function ExportDialog({ mode, staff, onClose, onConfirm }) {
         <div className="modal-head">
           <div>
             <span className="eyebrow">EKSPOR {mode.toUpperCase()}</span>
-            <h2>Pilih periode &amp; staf laporan</h2>
+            <h2>{isLockedToSelf ? "Pilih periode laporan Anda" : "Pilih periode & staf laporan"}</h2>
           </div>
           <button className="icon-button" data-testid="export-dialog-close" onClick={onClose}><X size={18} /></button>
         </div>
@@ -1211,33 +1214,43 @@ function ExportDialog({ mode, staff, onClose, onConfirm }) {
               onChange={(e) => setRefDate(e.target.value)}
             />
           </label>
-          <label className="export-field">
-            <span><Users size={14} /> Staf penanggung jawab</span>
-            <select
-              data-testid="export-staff-select"
-              value={staffId}
-              onChange={(e) => setStaffId(e.target.value)}
-            >
-              <option value="all">Semua Staf (Laporan per Staf)</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} · {s.department}
-                </option>
-              ))}
-            </select>
-          </label>
+          {isLockedToSelf ? (
+            <div className="export-field export-field-locked" data-testid="export-locked-staff">
+              <span><LockKeyhole size={14} /> Staf penanggung jawab</span>
+              <b>{lockedStaffObj ? `${lockedStaffObj.name} · ${lockedStaffObj.department}` : "Akun yang sedang masuk"}</b>
+              <small>Laporan otomatis mengikuti akun yang Anda pakai, tanpa perlu memilih staf.</small>
+            </div>
+          ) : (
+            <label className="export-field">
+              <span><Users size={14} /> Staf penanggung jawab</span>
+              <select
+                data-testid="export-staff-select"
+                value={staffId}
+                onChange={(e) => setStaffId(e.target.value)}
+              >
+                <option value="all">Semua Staf (Laporan per Staf)</option>
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {s.department}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         <div className="export-summary" data-testid="export-range-label">
           Rentang: <b>{label}</b>
           <br />
-          Target: <b>{selectedStaffObj ? `${selectedStaffObj.name} (${selectedStaffObj.department})` : "Seluruh Staf (Dikelompokkan per Penanggung Jawab)"}</b>
+          Target: <b>{isLockedToSelf
+            ? `Laporan Anda sendiri${lockedStaffObj ? ` — ${lockedStaffObj.name} (${lockedStaffObj.department})` : ""}`
+            : selectedStaffObj ? `${selectedStaffObj.name} (${selectedStaffObj.department})` : "Seluruh Staf (Dikelompokkan per Penanggung Jawab)"}</b>
         </div>
         <div className="modal-actions">
           <button className="secondary-btn" data-testid="export-cancel" onClick={onClose}>Batal</button>
           <button
             className="primary-btn"
             data-testid="export-confirm"
-            onClick={() => onConfirm({ period, refDate, staffId })}
+            onClick={() => onConfirm({ period, refDate, staffId: isLockedToSelf ? lockedStaffId : staffId })}
           >
             {mode === "excel" ? "Unduh Excel" : "Buka Pratinjau & Cetak PDF"}
           </button>
@@ -1850,6 +1863,9 @@ export default function App() {
 
   const isAdmin = authUser?.role === "admin";
   const isSupervisor = ["team_lead", "clinical_supervisor", "head"].includes(authUser?.role);
+  // Staf biasa tidak memilih staf lain saat ekspor: laporan langsung miliknya sendiri.
+  // Ketua Tim, Clinical Supervisor, dan Kepala tetap bebas memantau seluruh staf.
+  const exportLockedStaffId = authUser?.role === "staff" ? authUser?.id : null;
   const supervisedDepartments = authUser?.supervised_departments || [];
   const roleLabels = { staff: "Staf", admin: "Admin", team_lead: "Ketua Tim", clinical_supervisor: "Clinical Supervisor", head: "Kepala" };
   const assignableStaff = isAdmin
@@ -2416,8 +2432,10 @@ export default function App() {
   };
 
   const handleExportConfirm = ({ period, refDate, staffId }) => {
-    if (exportMode === "excel") runExportExcel(period, refDate, staffId);
-    else if (exportMode === "pdf") runExportPdf(period, refDate, staffId);
+    // Pengaman: role Staf selalu diekspor untuk laporan akunnya sendiri.
+    const scopedStaffId = authUser?.role === "staff" ? authUser.id : staffId;
+    if (exportMode === "excel") runExportExcel(period, refDate, scopedStaffId);
+    else if (exportMode === "pdf") runExportPdf(period, refDate, scopedStaffId);
     setExportMode(null);
   };
 
@@ -2484,8 +2502,18 @@ export default function App() {
               <span><b>{authUser?.name}</b><small>{roleLabels[authUser?.role] || "Pengguna"}</small></span>
             </div>
             <button className="logout-btn" data-testid="logout-button" onClick={logout} title="Keluar"><LogOut size={16} /><span>Keluar</span></button>
-            <button className="export-btn" data-testid="export-excel-button" onClick={() => setExportMode("excel")}><FileSpreadsheet size={16} /> Excel</button>
-            <button className="export-btn" data-testid="export-pdf-button" onClick={() => setExportMode("pdf")}><FileText size={16} /> PDF</button>
+            <button
+              className="export-btn"
+              data-testid="export-excel-button"
+              title={exportLockedStaffId ? "Ekspor Excel laporan Anda sendiri" : "Ekspor Excel laporan kinerja (semua staf dapat dipilih)"}
+              onClick={() => setExportMode("excel")}
+            ><FileSpreadsheet size={16} /> Excel</button>
+            <button
+              className="export-btn"
+              data-testid="export-pdf-button"
+              title={exportLockedStaffId ? "Cetak PDF laporan Anda sendiri" : "Cetak PDF laporan kinerja (semua staf dapat dipilih)"}
+              onClick={() => setExportMode("pdf")}
+            ><FileText size={16} /> PDF</button>
             <button className="theme-toggle" data-testid="theme-toggle-button" onClick={() => setDark(!dark)}>
               {dark ? <Sun size={17} /> : <Moon size={17} />}
               <span>{dark ? "Light" : "Dark"}</span>
@@ -2600,7 +2628,15 @@ export default function App() {
           onConfirm={handleConfirmTransition}
         />
       )}
-      {exportMode && <ExportDialog mode={exportMode} staff={staff} onClose={() => setExportMode(null)} onConfirm={handleExportConfirm} />}
+      {exportMode && (
+        <ExportDialog
+          mode={exportMode}
+          staff={staff}
+          lockedStaffId={exportLockedStaffId}
+          onClose={() => setExportMode(null)}
+          onConfirm={handleExportConfirm}
+        />
+      )}
       {pdfPreview && <PdfPreviewModal preview={pdfPreview} onClose={() => setPdfPreview(null)} />}
       {activationResult && (
         <div className="modal-backdrop" data-testid="activation-code-dialog">

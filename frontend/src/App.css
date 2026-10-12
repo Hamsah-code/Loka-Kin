@@ -188,6 +188,9 @@ nav{display:grid;gap:5px}
 .export-field{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
 .export-field span{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;font-weight:700}
 .export-field input,.export-field select{border:1px solid var(--input-border);background:var(--input-bg);color:var(--input-ink);border-radius:6px;padding:7px 10px;font-size:12px;max-width:65%}
+.export-field.export-field-locked{flex-direction:column;align-items:flex-start;gap:4px;border-style:dashed}
+.export-field.export-field-locked b{font-size:13px;font-weight:700;color:var(--ink)}
+.export-field.export-field-locked small{font-size:11px;color:var(--muted)}
 .export-summary{margin:14px 0 4px;font-size:12px;line-height:1.5;color:var(--muted)}
 .export-summary b{color:var(--ink)}
 
