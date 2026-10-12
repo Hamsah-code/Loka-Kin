@@ -351,12 +351,20 @@ def iso_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 
-def parse_datetime(value: str) -> Optional[datetime]:
+def parse_datetime(value: Any) -> Optional[datetime]:
+    """Ubah nilai ISO menjadi datetime UTC; None bila kosong atau tidak valid.
+
+    Nilai kosong harus ditangani di sini karena endpoint auth memakainya untuk
+    memeriksa sesi/kunci: dokumen sesi yang sudah dicabut atau field waktu yang
+    hilang harus berujung pada 401, bukan error 500.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
-    except (TypeError, ValueError):
+    except ValueError:
         return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
 def public_staff(
