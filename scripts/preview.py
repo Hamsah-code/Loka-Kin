@@ -46,6 +46,7 @@ FRONTEND_BUILD = REPO / "frontend" / "build"
 WORK = REPO / ".preview"
 CREDENTIALS = WORK / "kredensial.json"
 DOCX_DEFAULT = Path.home() / "Kredensial-Staf-LOKA-Kin.docx"
+XLSX_DEFAULT = Path.home() / "PIN-Staf-LOKA-Kin.xlsx"
 
 sys.path.insert(0, str(BACKEND))
 
@@ -315,7 +316,7 @@ class SesiAdmin:
         return hasil
 
 
-def demo_accounts(docx: Path) -> int:
+def demo_accounts(docx: Path | None, xlsx: Path | None = None) -> int:
     admin = SesiAdmin()
     if not admin.masuk():
         secret = os.environ.get("AUTH_SETUP_SECRET", "loka-preview-setup")
@@ -423,6 +424,8 @@ def demo_accounts(docx: Path) -> int:
 
     if docx:
         tulis_docx(hasil, docx)
+    if xlsx:
+        tulis_xlsx(hasil, xlsx)
     return 0 if not gagal else 2
 
 
@@ -562,6 +565,139 @@ def tulis_docx(hasil: list[dict], tujuan: Path) -> None:
     print(f"[accounts] dokumen Word: {tujuan} ({len(baris)} baris)")
 
 
+
+# --------------------------------------------------------------------------- #
+# berkas Excel
+# --------------------------------------------------------------------------- #
+def tulis_xlsx(hasil: list[dict], tujuan: Path) -> None:
+    """Tulis daftar kredensial ke berkas Excel (.xlsx).
+
+    NIP/NIK dan PIN ditulis sebagai TEKS (number_format '@') supaya Excel tidak
+    mengubah nomor panjang menjadi notasi ilmiah atau memangkas angka nol di depan.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    tipis = Side(style="thin", color="C9D3E0")
+    bingkai = Border(left=tipis, right=tipis, top=tipis, bottom=tipis)
+    kepala_fill = PatternFill("solid", fgColor="E8F0FF")
+    baris_fill = PatternFill("solid", fgColor="F7F9FC")
+    peringatan_fill = PatternFill("solid", fgColor="FFF4F4")
+    tengah = Alignment(horizontal="center", vertical="center")
+    kiri = Alignment(horizontal="left", vertical="center")
+    bungkus = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+    baris = sorted(hasil, key=lambda r: (r.get("role") != "admin", r.get("role") != "team_lead",
+                                        int(r["id"].split("-")[-1]) if r["id"].split("-")[-1].isdigit() else 10**6))
+    wb = Workbook()
+
+    # ---- lembar 1: daftar kredensial -------------------------------------
+    ws = wb.active
+    ws.title = "Kredensial Staf"
+    kolom = ["No", "Nama Staf", "Departemen", "Peran", "Username (NIP/NIK)", "PIN"]
+    lebar = [6, 34, 26, 18, 24, 12]
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(kolom))
+    sel = ws.cell(row=1, column=1, value="LOKA-Kin — Daftar Username & PIN Staf")
+    sel.font = Font(bold=True, size=14)
+    sel.alignment = tengah
+    ws.row_dimensions[1].height = 22
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(kolom))
+    sel = ws.cell(row=2, column=1, value=(
+        "Loka Rehabilitasi Narkotika Kalianda  •  Total: "
+        f"{len(baris)} staf  •  Dibuat: {datetime.now(ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y, %H:%M')} WIB"
+        "  •  Lingkungan: pratinjau/demo (bukan data produksi)"))
+    sel.font = Font(size=9, color="445566")
+    sel.alignment = tengah
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(kolom))
+    sel = ws.cell(row=3, column=1, value=(
+        "RAHASIA — JANGAN DISEBARLUASKAN.  PIN hanya tersimpan sebagai hash (PBKDF2) di server sehingga "
+        "tidak dapat dibaca ulang; PIN di daftar ini dibuatkan Admin untuk uji coba.  Staf yang belum punya "
+        "NIP/NIK resmi memakai nomor contoh berpola 18xxxxxxxxxxxxxx yang WAJIB diganti sebelum produksi.  "
+        "Serahkan PIN hanya kepada staf yang bersangkutan."))
+    sel.font = Font(bold=True, size=9, color="B01B1B")
+    sel.alignment = bungkus
+    sel.fill = peringatan_fill
+    for kolom_ke in range(1, len(kolom) + 1):
+        ws.cell(row=3, column=kolom_ke).fill = peringatan_fill
+    ws.row_dimensions[3].height = 58
+
+    baris_awal = 5
+    for indeks, judul in enumerate(kolom, start=1):
+        sel = ws.cell(row=baris_awal, column=indeks, value=judul)
+        sel.font = Font(bold=True, size=10)
+        sel.fill = kepala_fill
+        sel.alignment = tengah
+        sel.border = bingkai
+    ws.row_dimensions[baris_awal].height = 18
+
+    for no, item in enumerate(baris, start=1):
+        r = baris_awal + no
+        nilai = [no, item["nama"], item.get("department", "-"),
+                 LABEL_PERAN.get(item.get("role", "staff"), item.get("role", "staff")),
+                 item["nip"], item["pin"]]
+        for indeks, teks in enumerate(nilai, start=1):
+            sel = ws.cell(row=r, column=indeks, value=teks)
+            sel.border = bingkai
+            sel.alignment = kiri if indeks in (2, 3, 4) else tengah
+            if indeks in (5, 6):          # NIP/NIK & PIN wajib teks
+                sel.number_format = "@"
+            if indeks == 6:
+                sel.font = Font(bold=True, size=10)
+            if no % 2 == 0:
+                sel.fill = baris_fill
+
+    for indeks, lebar_kolom in enumerate(lebar, start=1):
+        ws.column_dimensions[get_column_letter(indeks)].width = lebar_kolom
+    ws.freeze_panes = ws.cell(row=baris_awal + 1, column=1)
+    ws.auto_filter.ref = f"A{baris_awal}:{get_column_letter(len(kolom))}{baris_awal + len(baris)}"
+
+    # ---- lembar 2: panduan ----------------------------------------------
+    ps = wb.create_sheet("Cara Masuk")
+    ps.column_dimensions["A"].width = 4
+    ps.column_dimensions["B"].width = 110
+    ps["B2"] = "Cara masuk aplikasi LOKA-Kin"
+    ps["B2"].font = Font(bold=True, size=13)
+    langkah = [
+        "Buka aplikasi LOKA-Kin, lalu klik tombol Masuk pada halaman depan.",
+        "Isi NIP/NIK (kolom Username) dan PIN sesuai baris nama Anda, lalu klik Masuk.",
+        "Setelah berhasil, klik tombol Dashboard pada header untuk membuka halaman kinerja harian.",
+        "Staf hanya melihat laporan miliknya sendiri; Admin, Ketua Tim, Clinical Supervisor, dan Kepala dapat memantau seluruh staf.",
+        "Ekspor laporan: role Staf langsung membuat dokumen laporannya sendiri; pimpinan dapat memilih seluruh staf atau satu staf.",
+        "Lupa PIN atau PIN bocor: minta Admin menerbitkan kode aktivasi baru (12 digit, berlaku 24 jam, sekali pakai), lalu pilih Aktivasi akun / lupa PIN dan buat PIN sendiri.",
+        "Jangan letakkan berkas ini pada repositori kode, grup percakapan, atau folder bersama.",
+    ]
+    for nomor, teks in enumerate(langkah, start=1):
+        ps.cell(row=3 + nomor, column=1, value=nomor).font = Font(bold=True, size=10)
+        sel = ps.cell(row=3 + nomor, column=2, value=teks)
+        sel.alignment = bungkus
+        sel.font = Font(size=10)
+        ps.row_dimensions[3 + nomor].height = 28
+
+    tujuan.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(tujuan)
+    print(f"[ekspor] berkas Excel: {tujuan} ({len(baris)} baris)")
+
+
+def ekspor(kredensial: Path, docx: Path | None, xlsx: Path | None) -> int:
+    """Tulis ulang berkas Word/Excel dari kredensial yang sudah terekam."""
+    if not kredensial.exists():
+        print(f"[ekspor] {kredensial} belum ada — jalankan `demo --accounts` lebih dahulu")
+        return 1
+    hasil = list(json.loads(kredensial.read_text()).values())
+    if docx:
+        tulis_docx(hasil, docx)
+    if xlsx:
+        tulis_xlsx(hasil, xlsx)
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pratinjau LOKA-Kin & utilitas data demo")
@@ -573,6 +709,11 @@ def main() -> int:
     aksi.add_argument("--roster", action="store_true", help="semai roster + akun demo (server berhenti)")
     aksi.add_argument("--accounts", action="store_true", help="lengkapi kredensial seluruh staf (server hidup)")
     demo.add_argument("--docx", type=Path, default=DOCX_DEFAULT, help=f"lokasi dokumen Word (default {DOCX_DEFAULT})")
+    demo.add_argument("--xlsx", type=Path, default=XLSX_DEFAULT, help=f"lokasi berkas Excel (default {XLSX_DEFAULT})")
+    exp = sub.add_parser("ekspor", help="tulis ulang Word/Excel dari kredensial yang terekam")
+    exp.add_argument("--kredensial", type=Path, default=CREDENTIALS, help="berkas rekaman kredensial")
+    exp.add_argument("--docx", type=Path, default=None, help="tulis dokumen Word ke lokasi ini")
+    exp.add_argument("--xlsx", type=Path, default=XLSX_DEFAULT, help=f"tulis berkas Excel (default {XLSX_DEFAULT})")
 
     args = parser.parse_args()
     if args.perintah == "serve":
@@ -581,10 +722,12 @@ def main() -> int:
     if args.perintah == "proxy":
         proxy()
         return 0
+    if args.perintah == "ekspor":
+        return ekspor(args.kredensial, args.docx, args.xlsx)
     if args.roster:
         asyncio.run(demo_roster())
         return 0
-    return demo_accounts(args.docx)
+    return demo_accounts(args.docx, args.xlsx)
 
 
 if __name__ == "__main__":
