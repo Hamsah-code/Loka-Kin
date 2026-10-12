@@ -89,3 +89,6 @@ credentials.json
 
 # Snapshot database lokal (dibuat runtime oleh backend/db.py)
 backend/data/*.json
+
+# Perkakas pratinjau lokal (kredensial/log runtime)
+.preview/
