@@ -13,9 +13,9 @@ Sub-perintah:
             --accounts  (jalankan saat server hidup) lengkapi kredensial seluruh
                         staf lewat alur resmi dan tulis daftar kredensial (.docx).
 
-Cookie sesi diberi atribut SameSite=None; Secure; Partitioned (CHIPS) plus
-jalur cadangan sesi tanpa cookie agar login tetap bekerja ketika aplikasi
-dibuka di dalam iframe lintas-situs (mis. panel preview).
+Cookie sesi diberi atribut SameSite=None; Secure; Partitioned (CHIPS) agar
+login tetap bekerja ketika aplikasi dibuka di dalam iframe lintas-situs (mis.
+panel preview), tanpa membagikan token sesi antarpengguna.
 
 Konfigurasi lewat variabel lingkungan:
   AUTH_SETUP_SECRET   rahasia penyiapan Admin pertama (default: loka-preview-setup)
@@ -50,9 +50,9 @@ XLSX_DEFAULT = Path.home() / "PIN-Staf-LOKA-Kin.xlsx"
 
 sys.path.insert(0, str(BACKEND))
 
-# Akun demo dengan NIP/NIK resmi-contoh, peran, dan PIN tetap.
+# Akun demo dengan identitas contoh yang ditandai non-produksi dan PIN tetap.
 DEMO_ACCOUNTS = {
-    "staff-9": {"nama": "Daniel, A.Md.Kep", "nip": "197804122006041005", "role": "admin",
+    "staff-9": {"nama": "Daniel, A.Md.Kep", "nip": "197804122006041005", "role": "super_admin",
                 "department": "Admin", "supervised": [], "pin": "246810"},
     "staff-3": {"nama": "dr. Heni Purwanti", "nip": "197501012005012003", "role": "team_lead",
                 "department": "Layanan Rehabilitasi Medis",
@@ -73,7 +73,7 @@ TUGAS_DEMO = {
 
 PIN_DILARANG = {"123456", "111111", "222222", "333333", "444444", "555555",
                 "666666", "777777", "888888", "999999", "000000"}
-LABEL_PERAN = {"admin": "Admin", "team_lead": "Ketua Tim", "clinical_supervisor": "Clinical Supervisor",
+LABEL_PERAN = {"admin": "Admin", "super_admin": "Super Admin", "team_lead": "Ketua Tim", "clinical_supervisor": "Clinical Supervisor",
                "head": "Kepala", "staff": "Staf"}
 
 
@@ -93,7 +93,6 @@ def _bangun_app_preview():
     class PreviewSupport:
         def __init__(self, app, **options):
             self.app = app
-            self.preview_token = ""  # sesi cadangan bila cookie diblokir browser
 
         async def __call__(self, scope, receive, send):
             if scope["type"] != "http":
@@ -106,15 +105,12 @@ def _bangun_app_preview():
                         "path": scope.get("path"), "host": headers.get("host"),
                         "xf_host": headers.get("x-forwarded-host"),
                         "ua": (headers.get("user-agent") or "")[:70],
+                        # Presence only: never log credentials, cookies or tokens.
+                        "bearer_present": headers.get("authorization", "").lower().startswith("bearer "),
+                        "session_cookie_present": "loka_kin_session=" in headers.get("cookie", ""),
                     }, ensure_ascii=False) + "\n")
             except Exception:
                 pass
-
-            if (self.preview_token and "loka_kin_session=" not in headers.get("cookie", "")
-                    and scope.get("path", "").startswith("/api/") and scope.get("path") != "/api/auth/login"):
-                gabung = "; ".join(p for p in [headers.get("cookie", ""), f"loka_kin_session={self.preview_token}"] if p)
-                scope = {**scope, "headers": [(k, v) for k, v in scope.get("headers", [])
-                                              if k.lower() != b"cookie"] + [(b"cookie", gabung.encode("latin-1"))]}
 
             async def send_wrapper(message):
                 if message["type"] == "http.response.start":
@@ -122,10 +118,6 @@ def _bangun_app_preview():
                     for key, value in message.get("headers", []):
                         if key.lower() == b"set-cookie":
                             teks = value.decode("latin-1")
-                            if "loka_kin_session=" in teks:
-                                token = teks.split("loka_kin_session=", 1)[1].split(";", 1)[0]
-                                if token:
-                                    self.preview_token = token
                             teks = re.sub(r"(?i)samesite\s*=\s*lax", "SameSite=None; Secure", teks)
                             if "samesite=" not in teks.lower():
                                 teks = f"{teks}; SameSite=None; Secure"
@@ -133,9 +125,10 @@ def _bangun_app_preview():
                                 teks = f"{teks}; Partitioned"
                             value = teks.encode("latin-1")
                         baru.append((key, value))
+                    if not scope.get("path", "").startswith("/api"):
+                        baru = [(key, value) for key, value in baru if key.lower() != b"cache-control"]
+                        baru.append((b"cache-control", b"no-store"))
                     message["headers"] = baru
-                    if scope.get("path") == "/api/auth/logout":
-                        self.preview_token = ""
                 await send(message)
 
             await self.app(scope, receive, send_wrapper)
@@ -253,6 +246,7 @@ async def demo_roster() -> None:
             "activation_code_hash": "", "activation_code_expires_at": "",
             "activation_code_attempts": 0, "activation_code_locked_until": "",
             "login_failed_attempts": 0, "login_locked_until": "", "seed_key": "",
+            "identity_is_placeholder": True, "credential_source": "demo-preview",
         }})
         print(f"[roster] {staff_id}: {doc['name'][:28]:30} {info['role']:9} PIN {info['pin']}")
     print("[roster] staf:", await db.staff.count_documents({}), "| tugas:", await db.tasks.count_documents({}))
@@ -364,16 +358,10 @@ def demo_accounts(docx: Path | None, xlsx: Path | None = None) -> int:
                           "role": staf["role"], "sumber": "sudah ada"})
             continue
 
-        nip = staf.get("nip") or (simpan or {}).get("nip") or f"1800000000{indeks:06d}"
-        if not staf.get("nip"):
-            status, _, _ = admin("PUT", f"/api/staff/{sid}", {"nip": nip})
-            if status in (401, 403, 429):
-                print(f"[accounts] otorisasi Admin bermasalah ({status}) — proses dihentikan. "
-                      "Hentikan server, jalankan `preview.py demo --roster`, lalu ulangi.")
-                break
-            if status != 200:
-                gagal.append((staf["name"], f"set NIP gagal ({status})"))
-                continue
+        nip = staf.get("nip") or (simpan or {}).get("nip")
+        if not nip:
+            gagal.append((staf["name"], "NIP/NIK resmi belum tersedia; impor roster resmi sebelum aktivasi"))
+            continue
 
         status, body, _ = admin("POST", f"/api/auth/staff/{sid}/activation-code")
         if status in (401, 403, 429):

@@ -8,9 +8,30 @@ import { Toaster, toast } from "sonner";
 import "@/App.css";
 import LandingPage from "@/components/LandingPage";
 import AuthModal from "@/components/AuthModal";
+import SystemAdminPage from "@/components/SystemAdminPage";
+import ChangePinModal from "@/components/ChangePinModal";
+import { clearPreviewSessionToken, getPreviewSessionToken, previewTokenFallbackEnabled } from "@/previewSession";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
 axios.defaults.withCredentials = true;
+// Fast refresh must replace, not stack, interceptors holding old session state.
+const previewInterceptorKey = Symbol.for("loka-kin.preview-session-interceptor");
+if (axios[previewInterceptorKey] !== undefined) {
+  axios.interceptors.request.eject(axios[previewInterceptorKey]);
+  delete axios[previewInterceptorKey];
+}
+if (previewTokenFallbackEnabled) {
+  axios[previewInterceptorKey] = axios.interceptors.request.use((config) => {
+    if (!config.url?.startsWith(`${API}/`)) return config;
+    const token = getPreviewSessionToken();
+    if (token) {
+      config.headers = config.headers || {};
+      if (typeof config.headers.set === "function") config.headers.set("Authorization", `Bearer ${token}`);
+      else config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  });
+}
 const columns = [
   { key: "todo", label: "To Do List", color: "blue", hint: "Daftar rencana tugas yang akan dikerjakan" },
   { key: "doing", label: "Doing", color: "amber", hint: "Sedang dikerjakan" },
@@ -24,6 +45,7 @@ const departments = [
 const staffRoles = [
   { id: "staff", label: "Staf" },
   { id: "admin", label: "Admin" },
+  { id: "super_admin", label: "Super Admin" },
   { id: "team_lead", label: "Ketua Tim" },
   { id: "clinical_supervisor", label: "Clinical Supervisor" },
   { id: "head", label: "Kepala" },
@@ -865,7 +887,7 @@ function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }
   );
 }
 
-function StaffModal({ staff, onClose, onSave }) {
+function StaffModal({ staff, onClose, onSave, canAssignSuperAdmin = false }) {
   const isEdit = Boolean(staff?.id);
   const [form, setForm] = useState({
     id: staff?.id || "",
@@ -880,6 +902,9 @@ function StaffModal({ staff, onClose, onSave }) {
     supervised_departments: staff?.supervised_departments || [],
   });
   const effectiveIdType = form.id_type || inferIdType(form.nip);
+  const availableRoles = canAssignSuperAdmin || form.role === "super_admin"
+    ? staffRoles
+    : staffRoles.filter((role) => role.id !== "super_admin");
   const toggleSupervisedDepartment = (department) => {
     setForm((current) => ({
       ...current,
@@ -915,7 +940,7 @@ function StaffModal({ staff, onClose, onSave }) {
           </select></label>
           <label className="full">Keterangan (jabatan / instalasi / bagian)<input data-testid="staff-keterangan-input" value={form.keterangan} onChange={(e) => setForm({ ...form, keterangan: e.target.value })} placeholder="Contoh: Perawat Pelaksana · Instalasi Detoksifikasi" /></label>
           <label className="full">Departemen<select data-testid="staff-department-select" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>{departments.map((d) => <option key={d}>{d}</option>)}</select></label>
-          <label className="full">Peran akun<select data-testid="staff-role-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, supervised_departments: supervisorRoleIds.includes(e.target.value) ? form.supervised_departments : [] })}>{staffRoles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}</select></label>
+          <label className="full">Peran akun<select data-testid="staff-role-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, supervised_departments: supervisorRoleIds.includes(e.target.value) ? form.supervised_departments : [] })}>{availableRoles.map((role) => <option key={role.id} value={role.id} disabled={role.id === "super_admin" && !canAssignSuperAdmin}>{role.label}</option>)}</select></label>
           {supervisorRoleIds.includes(form.role) && (
             <fieldset className="supervised-department-field full">
               <legend>Departemen yang diawasi</legend>
@@ -1439,7 +1464,7 @@ function Overview({ analytics, tasks, staffCount, onGo, onCreate, canCreateRepor
   );
 }
 
-function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCode }) {
+function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCode, isSuperAdmin = false }) {
   const [query, setQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const needle = query.trim().toLowerCase();
@@ -1507,13 +1532,13 @@ function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCod
               <small className={s.is_activated ? "pin-active" : "pin-pending"}>{s.is_activated ? "PIN aktif" : "Belum aktivasi"}</small>
             </div>
             <div className="row-actions">
-              <button className="activation-staff" data-testid={`activation-code-${s.id}`} disabled={!s.nip || s.active === false} title={s.active === false ? "Aktifkan data staf terlebih dahulu" : s.is_activated ? "Terbitkan kode reset PIN" : "Terbitkan kode aktivasi"} onClick={() => onIssueCode(s)}>
+              <button className="activation-staff" data-testid={`activation-code-${s.id}`} disabled={!s.nip || s.active === false || (s.role === "super_admin" && !isSuperAdmin)} title={s.role === "super_admin" && !isSuperAdmin ? "Hanya Super Admin yang dapat mengelola akun ini" : s.active === false ? "Aktifkan data staf terlebih dahulu" : s.is_activated ? "Terbitkan kode reset PIN" : "Terbitkan kode aktivasi"} onClick={() => onIssueCode(s)}>
                 <KeyRound size={14} /> Kode
               </button>
-              <button className="edit-staff" data-testid={`edit-staff-${s.id}`} onClick={() => onEdit(s)}>
+              <button className="edit-staff" data-testid={`edit-staff-${s.id}`} disabled={s.role === "super_admin" && !isSuperAdmin} onClick={() => onEdit(s)}>
                 <Pencil size={15} /> Ubah
               </button>
-              <button className="delete-staff" data-testid={`delete-staff-${s.id}`} onClick={() => onDelete(s)}>
+              <button className="delete-staff" data-testid={`delete-staff-${s.id}`} disabled={s.role === "super_admin" && !isSuperAdmin} onClick={() => onDelete(s)}>
                 <Trash2 size={15} /> Hapus
               </button>
             </div>
@@ -1807,6 +1832,8 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [authModal, setAuthModal] = useState(null);
   const [activationResult, setActivationResult] = useState(null);
+  const [pinChangeRequired, setPinChangeRequired] = useState(false);
+  const [landingSettings, setLandingSettings] = useState({});
   const [tasks, setTasks] = useState([]);
   const [staff, setStaff] = useState([]);
   const [analytics, setAnalytics] = useState({
@@ -1826,17 +1853,23 @@ export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("loka-kin-theme") === "dark");
 
   const load = useCallback(async () => {
-    if (!authUser) return;
+    if (!authUser || authUser.must_change_pin) return;
+    const requestToken = getPreviewSessionToken();
     try {
       const [t, s, a] = await Promise.all([
         axios.get(`${API}/tasks`), axios.get(`${API}/staff`), axios.get(`${API}/analytics`),
       ]);
+      if (previewTokenFallbackEnabled && requestToken !== getPreviewSessionToken()) return;
       setTasks(t.data); setStaff(s.data); setAnalytics(a.data);
     } catch (error) {
       if (error.response?.status === 401) {
+        if (previewTokenFallbackEnabled && requestToken !== getPreviewSessionToken()) return;
+        clearPreviewSessionToken();
         setAuthUser(null);
         setActive("home");
+        setAuthModal("login");
         setTasks([]); setStaff([]);
+        toast.error("Sesi tidak dapat diverifikasi. Silakan masuk kembali.");
       } else {
         toast.error("Data belum dapat dimuat");
       }
@@ -1844,30 +1877,40 @@ export default function App() {
   }, [authUser]);
   useEffect(() => {
     let alive = true;
+    const requestToken = getPreviewSessionToken();
     axios.get(`${API}/auth/me`)
       .then(({ data }) => {
-        if (!alive) return;
+        if (!alive || (previewTokenFallbackEnabled && requestToken !== getPreviewSessionToken())) return;
         setAuthUser(data);
+        setPinChangeRequired(Boolean(data.must_change_pin));
         setActive("overview");
       })
+      .catch((error) => {
+        if (alive && error.response?.status === 401 && requestToken === getPreviewSessionToken()) {
+          clearPreviewSessionToken();
+        }
+      });
+    axios.get(`${API}/public/landing-settings`)
+      .then(({ data }) => { if (alive) setLandingSettings(data); })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
   useEffect(() => {
-    if (authUser) load();
+    if (authUser && !authUser.must_change_pin) load();
   }, [authUser, load]);
   useEffect(() => {
     document.body.classList.toggle("dark-mode", dark);
     localStorage.setItem("loka-kin-theme", dark ? "dark" : "light");
   }, [dark]);
 
-  const isAdmin = authUser?.role === "admin";
+  const isAdmin = ["admin", "super_admin"].includes(authUser?.role);
+  const isSuperAdmin = authUser?.role === "super_admin";
   const isSupervisor = ["team_lead", "clinical_supervisor", "head"].includes(authUser?.role);
   // Staf biasa tidak memilih staf lain saat ekspor: laporan langsung miliknya sendiri.
   // Ketua Tim, Clinical Supervisor, dan Kepala tetap bebas memantau seluruh staf.
   const exportLockedStaffId = authUser?.role === "staff" ? authUser?.id : null;
   const supervisedDepartments = authUser?.supervised_departments || [];
-  const roleLabels = { staff: "Staf", admin: "Admin", team_lead: "Ketua Tim", clinical_supervisor: "Clinical Supervisor", head: "Kepala" };
+  const roleLabels = { staff: "Staf", admin: "Admin", super_admin: "Super Admin", team_lead: "Ketua Tim", clinical_supervisor: "Clinical Supervisor", head: "Kepala" };
   const assignableStaff = isAdmin
     ? staff.filter((person) => person.active !== false)
     : isSupervisor
@@ -1884,14 +1927,27 @@ export default function App() {
   };
   const completeLogin = (user) => {
     setAuthUser(user);
+    setPinChangeRequired(Boolean(user.must_change_pin));
     setAuthModal(null);
     setActive("overview");
     setSelectedStaff("all");
     toast.success(`Selamat datang, ${user.name}`);
   };
+  const saveLandingSettings = async (values) => {
+    const response = await axios.put(`${API}/admin/landing-settings`, values);
+    setLandingSettings(response.data);
+    return response.data;
+  };
+  const finishTemporaryPinChange = async () => {
+    setPinChangeRequired(false);
+    setAuthUser((current) => current ? { ...current, must_change_pin: false } : current);
+    await load();
+  };
   const logout = async () => {
     try { await axios.post(`${API}/auth/logout`); } catch { /* sesi tetap dihapus dari UI */ }
+    clearPreviewSessionToken();
     setAuthUser(null);
+    setPinChangeRequired(false);
     setTasks([]); setStaff([]);
     setActive("home");
     setSelectedStaff("all");
@@ -2445,6 +2501,7 @@ export default function App() {
     { id: "board", label: "Laporan harian", icon: ClipboardList },
     ...(isAdmin ? [{ id: "staff", label: "Daftar staf", icon: Users }] : []),
     { id: "analytics", label: "Analitik", icon: BarChart3 },
+    ...(isSuperAdmin ? [{ id: "settings", label: "Pengaturan website", icon: Settings2 }] : []),
   ];
   const today = currentDate();
   const retainedInactiveAssignee = modal?.id && isAdmin ? staff.find((person) => person.id === modal.staff_id) : null;
@@ -2457,8 +2514,9 @@ export default function App() {
     return (
       <>
         <Toaster position="top-right" />
-        <LandingPage authenticated={Boolean(authUser)} onLogin={() => authUser ? go("overview") : setAuthModal("login")} />
+        <LandingPage authenticated={Boolean(authUser)} settings={landingSettings} onLogin={() => authUser ? go("overview") : setAuthModal("login")} />
         {authModal && <AuthModal mode={authModal} onModeChange={setAuthModal} onClose={() => setAuthModal(null)} onAuthenticated={completeLogin} />}
+        {pinChangeRequired && <ChangePinModal onChanged={finishTemporaryPinChange} />}
       </>
     );
   }
@@ -2486,9 +2544,6 @@ export default function App() {
           <div className="sync-mini">
             <span className="live-dot" />Database aktif<strong>MongoDB lokal</strong>
           </div>
-          <button className="nav-item" data-testid="nav-settings" onClick={() => toast.info("Pengaturan segera tersedia")}>
-            <Settings2 size={17} />Pengaturan
-          </button>
         </div>
       </aside>
       <main className="main">
@@ -2611,14 +2666,16 @@ export default function App() {
               onDelete={deleteStaff}
               onImport={() => setImportOpen(true)}
               onIssueCode={issueActivationCode}
+              isSuperAdmin={isSuperAdmin}
             />
           )}
           {active === "analytics" && <Analytics analytics={analytics} />}
+          {active === "settings" && isSuperAdmin && <SystemAdminPage settings={landingSettings} onSaveSettings={saveLandingSettings} />}
         </div>
       </main>
       {importOpen && <StaffImportModal onClose={() => setImportOpen(false)} onConfirm={importStaff} onResetRoster={resetRoster} />}
       {modal?.staffModal
-        ? <StaffModal staff={modal.staff} onClose={() => setModal(null)} onSave={saveStaff} />
+        ? <StaffModal staff={modal.staff} onClose={() => setModal(null)} onSave={saveStaff} canAssignSuperAdmin={isSuperAdmin} />
         : modal && <TaskModal task={modal.id ? modal : null} staff={taskModalStaff} allowStaffSelection={isAdmin} onClose={() => setModal(null)} onSave={save} />}
       {transitionModal && (
         <StatusTransitionModal
@@ -2656,6 +2713,7 @@ export default function App() {
         </div>
       )}
       {authModal && <AuthModal mode={authModal} onModeChange={setAuthModal} onClose={() => setAuthModal(null)} onAuthenticated={completeLogin} />}
+      {pinChangeRequired && <ChangePinModal onChanged={finishTemporaryPinChange} />}
     </div>
   );
 }

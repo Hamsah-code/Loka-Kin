@@ -653,3 +653,23 @@ nav{display:grid;gap:5px}
 .active-account-field{display:flex;align-items:center;gap:9px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink)!important;cursor:pointer}
 .active-account-field input{width:16px!important;height:16px;margin:0!important;accent-color:#4268dc}
 .active-account-field span{font-size:11px;font-weight:700}
+
+/* Super Admin forced PIN rotation */
+.change-pin-backdrop{z-index:120;background:rgba(9,20,39,.74)}
+.change-pin-card{width:min(470px,100%);padding:28px}
+.change-pin-card h2{margin:7px 0 6px;font:700 20px 'Plus Jakarta Sans',sans-serif;color:var(--ink)}
+.change-pin-icon{display:grid;width:42px;height:42px;place-items:center;border-radius:13px;background:#fff4dd;color:#a45311;margin-bottom:12px}
+.change-pin-form{display:flex;flex-direction:column;gap:12px;margin-top:18px}
+.change-pin-form>label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:11px;font-weight:700}
+.change-pin-form>label span{display:inline-flex;align-items:center;gap:6px}
+.change-pin-form input{border:1px solid var(--input-border);border-radius:7px;background:var(--input-bg);color:var(--input-ink);padding:10px 12px;font-size:14px;letter-spacing:.1em}
+.change-pin-form .auth-security-note{margin-top:2px}
+.change-pin-form>.primary-btn{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:3px}
+.dark-mode .change-pin-icon{background:#382405;color:#fcd34d}
+
+/* Passive notifications must not trap the mouse over modal close/save controls.
+   Keep explicit toast actions clickable without blocking the UI underneath. */
+[data-sonner-toast] { pointer-events: none !important; }
+[data-sonner-toast] button, [data-sonner-toast] a { pointer-events: auto; }
+.modal-backdrop { z-index: 40; }
+.change-pin-backdrop { z-index: 120; }

@@ -30,6 +30,8 @@ function makeDevServerV5Compatible(devServerConfig) {
   compatibleConfig.headers = {
     ...compatibleConfig.headers,
     "Cross-Origin-Resource-Policy": "same-origin",
+    // Preview uses a stable bundle URL; never reuse an older landing page.
+    "Cache-Control": "no-store",
   };
 
   if (onBeforeSetupMiddleware || setupMiddlewares) {

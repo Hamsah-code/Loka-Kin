@@ -1,11 +1,13 @@
 .landing-page {
   --landing-ink: #17305c;
   --landing-muted: #71809c;
-  --landing-blue: #2d65ed;
+  --landing-blue: var(--landing-primary, #2d65ed);
   --landing-purple: #6541dd;
   --landing-gold: #ffc84a;
   min-height: 100vh;
-  overflow: hidden;
+  /* Avoid a hidden scroll container swallowing anchor navigation in preview. */
+  overflow-x: clip;
+  overflow-y: visible;
   background: #f7faff;
   color: var(--landing-ink);
   font-family: 'DM Sans', sans-serif;
@@ -34,7 +36,7 @@
   background:
     radial-gradient(ellipse at 85% 27%, rgba(153, 76, 255, .46), transparent 35%),
     radial-gradient(ellipse at 11% 81%, rgba(0, 199, 255, .26), transparent 34%),
-    linear-gradient(112deg, #087eeb 0%, #2458ec 43%, #4935e3 72%, #6b2bdd 100%);
+    linear-gradient(112deg, var(--landing-primary, #087eeb) 0%, var(--landing-primary, #2458ec) 43%, #4935e3 72%, #6b2bdd 100%);
   box-shadow: 0 26px 78px rgba(34, 69, 158, .23), inset 0 1px 0 rgba(255, 255, 255, .3);
 }
 
@@ -1329,3 +1331,7 @@
     transition-duration: .01ms !important;
   }
 }
+
+/* Anchor sections remain visible after menu navigation on desktop and mobile. */
+.landing-page > section { scroll-margin-top: 24px; }
+.landing-page > section:focus-visible { outline: 2px solid var(--landing-primary, #2458EC); outline-offset: -2px; }

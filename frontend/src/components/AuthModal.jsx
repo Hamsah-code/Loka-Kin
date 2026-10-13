@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { ArrowLeft, KeyRound, ShieldCheck, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
+import { previewTokenFallbackEnabled, savePreviewSessionToken } from "@/previewSession";
 import "./AuthModal.css";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
@@ -11,7 +12,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
   const [generatedCode, setGeneratedCode] = useState(null);
   const [rosterRows, setRosterRows] = useState([]);
   const [rosterBusy, setRosterBusy] = useState(false);
-  const [form, setForm] = useState({ nip: "", pin: "", pin_confirmation: "", activation_code: "", setup_secret: "" });
+  const [form, setForm] = useState({ name: "", nip: "", pin: "", pin_confirmation: "", activation_code: "", setup_secret: "" });
 
   const change = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
   const setMode = (next) => {
@@ -48,6 +49,9 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
     try {
       if (mode === "login") {
         const response = await axios.post(`${API}/auth/login`, { nip: form.nip, pin: form.pin }, { withCredentials: true });
+        if (previewTokenFallbackEnabled && response.data.session_token) {
+          savePreviewSessionToken(response.data.session_token);
+        }
         onAuthenticated(response.data.user);
         return;
       }
@@ -60,6 +64,16 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
         }, { withCredentials: true });
         setForm((current) => ({ ...current, pin: "", pin_confirmation: "", activation_code: "" }));
         onModeChange("login");
+        return;
+      }
+      if (mode === "bootstrap-super-admin") {
+        const response = await axios.post(`${API}/auth/bootstrap-super-admin`, {
+          setup_secret: form.setup_secret,
+          name: form.name,
+          nip: form.nip,
+        }, { withCredentials: true });
+        setGeneratedCode(response.data);
+        setForm((current) => ({ ...current, setup_secret: "" }));
         return;
       }
       const response = await axios.post(`${API}/auth/bootstrap-admin`, {
@@ -78,12 +92,20 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
     }
   };
 
-  const title = mode === "login" ? "Selamat datang kembali" : mode === "activate" ? "Aktifkan akun" : "Penyiapan Admin pertama";
+  const title = mode === "login"
+    ? "Selamat datang kembali"
+    : mode === "activate"
+      ? "Aktifkan akun"
+      : mode === "bootstrap-super-admin"
+        ? "Penyiapan Super Admin pertama"
+        : "Penyiapan Admin pertama";
   const subtitle = mode === "login"
     ? "Masuk dengan NIP/NIK dan PIN pribadi Anda."
     : mode === "activate"
-      ? "Masukkan kode sekali pakai dari Admin, lalu buat PIN enam digit."
-      : "Gunakan kode penyiapan dari pemilik sistem untuk menerbitkan aktivasi kepada Admin di roster.";
+      ? "Masukkan kode sekali pakai, lalu buat PIN enam digit."
+      : mode === "bootstrap-super-admin"
+        ? "Pemilik sistem dapat mendaftarkan satu akun Super Admin pertama dengan NIP/NIK resmi."
+        : "Gunakan kode penyiapan dari pemilik sistem untuk menerbitkan aktivasi kepada Admin di roster.";
 
   return (
     <div className="auth-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -96,9 +118,9 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
 
         {generatedCode ? (
           <div className="auth-code-result" role="status">
-            <b>Kode aktivasi Admin</b>
+            <b>Kode aktivasi {generatedCode.role === "super_admin" ? "Super Admin" : "Admin"}</b>
             <code>{generatedCode.activation_code}</code>
-            <span>Berlaku hingga {new Date(generatedCode.expires_at).toLocaleString("id-ID")}. Kode ini hanya ditampilkan sekarang; serahkan langsung kepada Admin dan jangan kirim melalui kanal publik.</span>
+            <span>Berlaku hingga {new Date(generatedCode.expires_at).toLocaleString("id-ID")}. Kode ini hanya ditampilkan sekali; serahkan langsung kepada pemilik akun dan jangan kirim melalui kanal publik.</span>
             <button type="button" className="auth-primary" onClick={() => navigator.clipboard?.writeText(generatedCode.activation_code)}>Salin kode</button>
             <button type="button" className="auth-link" onClick={() => { setGeneratedCode(null); onModeChange("login"); }}>Kembali ke Masuk</button>
           </div>
@@ -139,6 +161,20 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
               </>
             )}
 
+            {mode === "bootstrap-super-admin" && (
+              <>
+                <label>
+                  <span><UserRound size={14} /> Nama Super Admin</span>
+                  <input name="name" value={form.name} onChange={change} autoComplete="name" maxLength={100} placeholder="Nama sesuai identitas" required />
+                </label>
+                <label>
+                  <span><KeyRound size={14} /> Kode penyiapan sistem</span>
+                  <input name="setup_secret" value={form.setup_secret} onChange={change} type="password" autoComplete="off" placeholder="Diberikan pemilik sistem" required />
+                </label>
+                <p className="auth-hint">Masukkan NIP 18 digit atau NIK 16 digit resmi milik pengelola. Nomor contoh tidak boleh digunakan.</p>
+              </>
+            )}
+
             {mode === "bootstrap" && (
               <>
                 <label>
@@ -161,7 +197,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
             )}
 
             <button className="auth-primary" type="submit" disabled={busy || (mode === "bootstrap" && rosterBusy)}>
-              {busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "activate" ? "Buat PIN dan aktifkan" : "Terbitkan kode aktivasi"}
+              {busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "activate" ? "Buat PIN dan aktifkan" : mode === "bootstrap-super-admin" ? "Daftarkan Super Admin" : "Terbitkan kode aktivasi"}
             </button>
           </form>
         )}
@@ -171,7 +207,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
             {mode !== "login" && <button type="button" className="auth-link" onClick={() => setMode("login")}><ArrowLeft size={14} /> Kembali ke Masuk</button>}
             {mode === "login" && <>
               <button type="button" className="auth-link" onClick={() => setMode("activate")}>Aktivasi akun / lupa PIN</button>
-              <button type="button" className="auth-link" onClick={() => setMode("bootstrap")}>Penyiapan Admin pertama</button>
+              <button type="button" className="auth-link" onClick={() => setMode("bootstrap-super-admin")}>Penyiapan Super Admin pertama</button>
             </>}
           </div>
         )}

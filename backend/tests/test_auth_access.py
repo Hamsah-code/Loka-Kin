@@ -131,6 +131,53 @@ def _login(client, nip):
     return response.json()["user"]
 
 
+def test_preview_session_token_fallback_is_opt_in(api_client, monkeypatch):
+    monkeypatch.setenv("AUTH_PREVIEW_TOKEN_FALLBACK", "true")
+    login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    assert login.status_code == 200
+    session_token = login.json().get("session_token")
+    assert session_token
+    assert "no-store" in login.headers.get("cache-control", "")
+
+    api_client.cookies.clear()
+    current_user = api_client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {session_token}"}
+    )
+    assert current_user.status_code == 200
+    assert current_user.json()["id"] == "staff-2"
+
+    monkeypatch.delenv("AUTH_PREVIEW_TOKEN_FALLBACK")
+    api_client.cookies.clear()
+    regular_login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    assert regular_login.status_code == 200
+    assert "session_token" not in regular_login.json()
+
+
+
+def test_explicit_session_overrides_stale_cookie_and_logout_revokes_it(api_client, monkeypatch):
+    monkeypatch.setenv("AUTH_PREVIEW_TOKEN_FALLBACK", "true")
+    login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    token = login.json()["session_token"]
+    api_client.cookies.clear()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Cookie": f"{server.SESSION_COOKIE_NAME}=expired-old-cookie",
+    }
+    for path in ("auth/me", "staff", "tasks", "analytics"):
+        result = api_client.get(f"/api/{path}", headers=headers)
+        assert result.status_code == 200, (path, result.text)
+
+    assert api_client.post("/api/auth/logout", headers=headers).status_code == 200
+    assert api_client.get("/api/auth/me", headers=headers).status_code == 401
+
+
+def test_invalid_explicit_session_does_not_fall_back_to_cookie(api_client):
+    _login(api_client, STAFF_NIP)
+    assert api_client.get("/api/auth/me").status_code == 200
+    assert api_client.get(
+        "/api/auth/me", headers={"Authorization": "Bearer invalid-token"}
+    ).status_code == 401
+
 def _full_task(task_id, staff_id, *, title=None, status="todo"):
     return {
         "title": title or f"Laporan {task_id}",
@@ -313,3 +360,146 @@ def test_unauthenticated_requests_are_denied_and_logout_revokes_session(api_clie
     assert user["role"] == "staff"
     assert api_client.post("/api/auth/logout").status_code == 200
     assert api_client.get("/api/auth/me").status_code == 401
+
+
+def _bootstrap_super_admin(client, nip="198602022012011002"):
+    setup = client.post("/api/auth/bootstrap-super-admin", json={
+        "setup_secret": TEST_SETUP_SECRET,
+        "name": "Super Admin Test",
+        "nip": nip,
+    })
+    assert setup.status_code == 200, setup.text
+    code = setup.json()["activation_code"]
+    activation = client.post("/api/auth/activate", json={
+        "nip": nip,
+        "activation_code": code,
+        "pin": "864209",
+        "pin_confirmation": "864209",
+    })
+    assert activation.status_code == 200, activation.text
+    login = client.post("/api/auth/login", json={"nip": nip, "pin": "864209"})
+    assert login.status_code == 200, login.text
+    return login.json()["user"]
+
+
+def test_super_admin_bootstrap_and_landing_page_controls(api_client):
+    public_defaults = api_client.get("/api/public/landing-settings")
+    assert public_defaults.status_code == 200
+    assert public_defaults.json()["brand_name"] == "Loka-Kin"
+
+    super_admin = _bootstrap_super_admin(api_client)
+    assert super_admin["role"] == "super_admin"
+    assert super_admin["role_label"] == "Super Admin"
+
+    updated = api_client.put("/api/admin/landing-settings", json={
+        **server.DEFAULT_LANDING_SETTINGS,
+        "brand_name": "Loka Rehabilitasi Kalianda",
+        "hero_title": "Kinerja layanan",
+        "show_features": False,
+        "accent_color": "#3366CC",
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["brand_name"] == "Loka Rehabilitasi Kalianda"
+    assert api_client.get("/api/public/landing-settings").json()["show_features"] is False
+    assert api_client.get("/api/admin/credentials/status").status_code == 200
+
+
+def test_regular_admin_cannot_access_super_admin_tools_or_assign_super_admin(admin_client):
+    assert admin_client.get("/api/admin/credentials/status").status_code == 403
+    assert admin_client.put("/api/admin/landing-settings", json=server.DEFAULT_LANDING_SETTINGS).status_code == 403
+    created = admin_client.post("/api/staff", json={
+        "name": "Percobaan Super Admin",
+        "department": "Admin",
+        "nip": "198602022012011009",
+        "role": "super_admin",
+    })
+    assert created.status_code == 403
+
+
+def test_credentials_pdf_rotates_staff_pins_once_and_forces_change(api_client, monkeypatch):
+    _bootstrap_super_admin(api_client)
+    generated = []
+
+    def deterministic_pin(used):
+        value = f"{900001 + len(used):06d}"
+        used.add(value)
+        generated.append(value)
+        return value
+
+    monkeypatch.setattr(server, "generate_temporary_pin", deterministic_pin)
+    status = api_client.get("/api/admin/credentials/status")
+    assert status.status_code == 200
+    assert status.json()["ready_for_pin_pdf"] is True
+
+    pdf = api_client.post("/api/admin/credentials/rotate-pdf", json={})
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.headers["content-type"].startswith("application/pdf")
+    assert pdf.content.startswith(b"%PDF")
+    assert len(generated) == 5
+
+    # staff-2 sorts second (after the Admin fixture account), and receives 900002.
+    login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": "900002"})
+    assert login.status_code == 200, login.text
+    assert login.json()["user"]["must_change_pin"] is True
+    blocked = api_client.get("/api/tasks")
+    assert blocked.status_code == 403
+
+    changed = api_client.post("/api/auth/change-pin", json={
+        "current_pin": "900002",
+        "new_pin": NEW_PIN,
+        "pin_confirmation": NEW_PIN,
+    })
+    assert changed.status_code == 200, changed.text
+    assert api_client.get("/api/auth/me").json()["must_change_pin"] is False
+    assert api_client.get("/api/tasks").status_code == 200
+
+
+def test_credentials_pdf_blocks_missing_or_placeholder_official_ids(api_client):
+    _bootstrap_super_admin(api_client)
+    api_client.put(f"/api/staff/staff-2", json={
+        "name": "Staf Umum A",
+        "department": "Umum",
+        "nip": "",
+    })
+    status = api_client.get("/api/admin/credentials/status")
+    assert status.status_code == 200
+    assert status.json()["ready_for_pin_pdf"] is False
+    assert status.json()["missing_or_placeholder_identity"] >= 1
+    response = api_client.post("/api/admin/credentials/rotate-pdf", json={})
+    assert response.status_code == 409
+    assert "NIP/NIK resmi" in response.json()["detail"]["message"]
+
+
+def test_roster_replace_and_reset_do_not_disable_super_admin(api_client):
+    user = _bootstrap_super_admin(api_client, nip=STAFF_NIP)
+    replacement = api_client.post("/api/staff/import", json={
+        "mode": "replace",
+        "rows": [{"name": "Pegawai pengujian", "nip": UMUM_STAFF_NIP, "department": "Umum"}],
+    })
+    assert replacement.status_code == 200, replacement.text
+    assert api_client.get("/api/auth/me").json()["id"] == user["id"]
+    assert api_client.get("/api/admin/credentials/status").status_code == 200
+    assert api_client.delete("/api/staff/roster").status_code == 200
+    assert api_client.get("/api/auth/me").json()["role"] == "super_admin"
+
+
+def test_roster_role_does_not_demote_system_super_admin(api_client):
+    _bootstrap_super_admin(api_client, nip=STAFF_NIP)
+    replacement = api_client.post("/api/staff/import", json={
+        "mode": "replace",
+        "rows": [{"name": "Staf Umum A", "nip": STAFF_NIP, "department": "Umum", "role": "staff"}],
+    })
+    assert replacement.status_code == 200, replacement.text
+    assert api_client.get("/api/auth/me").json()["role"] == "super_admin"
+
+
+def test_small_roster_with_no_reports_does_not_crash(api_client):
+    _bootstrap_super_admin(api_client)
+    api_client.portal.call(server.db.tasks.delete_many, {})
+    replacement = api_client.post("/api/staff/import", json={
+        "mode": "replace",
+        "rows": [{"name": "Staf Umum A", "nip": STAFF_NIP, "department": "Umum"}],
+    })
+    assert replacement.status_code == 200, replacement.text
+    assert api_client.get("/api/tasks").json() == []
+    assert api_client.get("/api/analytics").status_code == 200

@@ -207,7 +207,9 @@ def test_staff_import_merge_and_restore(client):
         assert restore.json()["total_roster"] == snapshot["count"]
 
     after = client.get(f"{BASE_URL}/api/staff", timeout=20).json()
-    assert not [s for s in after if s["name"] == new_name], "impor uji coba harus dibersihkan"
+    restored_test_rows = [s for s in after if s["name"] == new_name]
+    assert all(not s["active"] for s in restored_test_rows), "baris di luar roster harus diarsipkan"
+    assert client.get(f"{BASE_URL}/api/auth/me", timeout=20).status_code == 200
 
 
 def test_staff_import_rejects_empty_rows(client):
@@ -357,7 +359,9 @@ def test_import_csv_fills_nip_for_all_staff(client, tmp_path):
     try:
         staff = client.get(f"{BASE_URL}/api/staff?include_inactive=false", timeout=20).json()
         by_name = {row["name"]: row for row in staff}
-        assert len(staff) == 2
+        # The system Super Admin stays available outside the employee roster.
+        assert len([row for row in staff if row.get("role") != "super_admin"]) == 2
+        assert client.get(f"{BASE_URL}/api/auth/me", timeout=20).status_code == 200
         assert by_name["Uji Csv Satu, S.Kep"]["nip"] == "198001012006041001"
         assert by_name["Uji Csv Satu, S.Kep"]["id_type"] == "NIP"
         assert by_name["Uji Csv Dua, A.Md"]["nip"] == "1600000000000123"
@@ -485,7 +489,8 @@ def test_import_pdf_replaces_whole_roster(client, tmp_path):
 
     try:
         staff = client.get(f"{BASE_URL}/api/staff?include_inactive=false", timeout=20).json()
-        assert len(staff) == 2, staff
+        assert len([row for row in staff if row.get("role") != "super_admin"]) == 2, staff
+        assert client.get(f"{BASE_URL}/api/auth/me", timeout=20).status_code == 200
         by_name = {row["name"]: row for row in staff}
         assert by_name["Uji Pdf Satu, S.Kep"]["nip"] == "198001012006041001"
         assert by_name["Uji Pdf Satu, S.Kep"]["id_type"] == "NIP"
@@ -513,11 +518,15 @@ def test_roster_reset_reactivates_default_staff(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["roster_count"] >= 78
-    assert body["total_staff"] == body["active_staff"], "tidak boleh ada staf resmi yang tertinggal nonaktif"
+    assert body["active_staff"] >= body["roster_count"]
+    assert body["total_staff"] >= body["active_staff"]  # historical imports remain archived
 
     staff = client.get(f"{BASE_URL}/api/staff?include_inactive=false", timeout=20).json()
     assert len(staff) >= 78
     assert all(row["active"] for row in staff)
+    roster = client.get(f"{BASE_URL}/api/staff/roster", timeout=20).json()["rows"]
+    active_names = {row["name"] for row in staff}
+    assert all(row["name"] in active_names for row in roster)
 
 
 def test_database_status_reports_persistence(client):
@@ -629,9 +638,8 @@ def test_seed_tasks_reference_valid_staff(client):
     assert len(seeded) == 4, "Seed tasks task-1..task-4 must exist"
     for t in seeded:
         assert t["staff_id"] in staff_ids, f"{t['id']} refers to missing staff {t['staff_id']}"
-        # Expected staff-1..staff-4 pinned
-        idx = int(t["id"].split("-")[1])
-        assert t["staff_id"] == f"staff-{idx}"
+        # Report ownership is by stable identity, never by a roster slot number.
+        assert t["staff_id"]
 
 
 # ---------- Analytics ----------

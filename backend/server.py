@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,8 +7,8 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
-from secrets import token_urlsafe
-import hashlib, json, os, re, tempfile, uuid, asyncio
+from secrets import token_urlsafe, randbelow
+import hashlib, json, os, re, tempfile, uuid, asyncio, io
 
 from auth_utils import (
     constant_time_equal,
@@ -38,16 +39,45 @@ DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Laya
 ROLE_LABELS = {
     "staff": "Staf",
     "admin": "Admin",
+    "super_admin": "Super Admin",
     "team_lead": "Ketua Tim",
     "clinical_supervisor": "Clinical Supervisor",
     "head": "Kepala",
 }
 VALID_ROLES = set(ROLE_LABELS)
+ADMIN_ROLES = {"admin", "super_admin"}
 SUPERVISOR_ROLES = {"team_lead", "clinical_supervisor", "head"}
-READ_ALL_ROLES = {"admin", *SUPERVISOR_ROLES}
+READ_ALL_ROLES = {*ADMIN_ROLES, *SUPERVISOR_ROLES}
 SESSION_COOKIE_NAME = "loka_kin_session"
 SESSION_TTL_HOURS = 12
 ACTIVATION_TTL_HOURS = 24
+LANDING_SETTINGS_KEY = "landing_page"
+DEFAULT_LANDING_SETTINGS = {
+    "brand_name": "Loka-Kin",
+    "hero_kicker": "PLATFORM KINERJA TIM TERINTEGRASI",
+    "hero_title": "Dorong Kinerja Tim",
+    "hero_highlight": "Menjadi Lebih Optimal",
+    "hero_description": "Platform kinerja karyawan yang memudahkan penetapan target, pelacakan kemajuan, dan pengakuan prestasi secara real-time.",
+    "hero_cta": "Masuk",
+    "assurance_one": "Pantau progres real-time",
+    "assurance_two": "Laporan lebih terukur",
+    "nav_home": "Home",
+    "nav_features": "Fitur",
+    "nav_how": "Cara kerja",
+    "nav_about": "Tentang",
+    "show_features": True,
+    "features_title": "Kerja Tim Menjadi Lebih",
+    "features_highlight": "Terarah",
+    "features_description": "LOKA-Kin membantu tim menyusun target, menjalankan pekerjaan, dan melihat hasilnya dengan lebih jelas.",
+    "show_how": True,
+    "how_title": "Dari rencana menjadi hasil nyata.",
+    "how_description": "Semua orang tahu apa yang dikerjakan, siapa penanggung jawabnya, dan sejauh mana progresnya.",
+    "show_about": True,
+    "about_title": "Bangun ritme kerja yang lebih baik bersama LOKA-Kin.",
+    "about_description": "Satukan target, progres, dan capaian tim dalam satu tempat.",
+    "footer_text": "© LOKA-Kin. Loka Rehabilitasi Narkotika Kalianda.",
+    "accent_color": "#2458EC",
+}
 AUTH_MAX_ATTEMPTS = 5
 AUTH_LOCK_MINUTES = 15
 
@@ -56,6 +86,7 @@ def normalize_role(value: str) -> str:
     raw = str(value or "staff").strip().lower().replace("-", "_").replace(" ", "_")
     aliases = {
         "staf": "staff", "pegawai": "staff", "admin": "admin",
+        "superadmin": "super_admin", "super_admin": "super_admin", "super_administrator": "super_admin",
         "ketua_tim": "team_lead", "ketuatim": "team_lead", "team_leader": "team_lead",
         "clinical_supervisor": "clinical_supervisor", "supervisor_klinis": "clinical_supervisor",
         "kepala": "head", "head_of_office": "head",
@@ -315,6 +346,45 @@ class BootstrapAdminRequest(BaseModel):
     roster: Optional[List[StaffImportRow]] = None
 
 
+class BootstrapSuperAdminRequest(BaseModel):
+    setup_secret: str
+    nip: str
+    name: str = "Super Admin"
+
+
+class ChangePinRequest(BaseModel):
+    current_pin: str
+    new_pin: str
+    pin_confirmation: str
+
+
+class LandingPageSettings(BaseModel):
+    brand_name: str = Field(default=DEFAULT_LANDING_SETTINGS["brand_name"], max_length=80)
+    hero_kicker: str = Field(default=DEFAULT_LANDING_SETTINGS["hero_kicker"], max_length=120)
+    hero_title: str = Field(default=DEFAULT_LANDING_SETTINGS["hero_title"], max_length=100)
+    hero_highlight: str = Field(default=DEFAULT_LANDING_SETTINGS["hero_highlight"], max_length=100)
+    hero_description: str = Field(default=DEFAULT_LANDING_SETTINGS["hero_description"], max_length=500)
+    hero_cta: str = Field(default=DEFAULT_LANDING_SETTINGS["hero_cta"], max_length=40)
+    assurance_one: str = Field(default=DEFAULT_LANDING_SETTINGS["assurance_one"], max_length=80)
+    assurance_two: str = Field(default=DEFAULT_LANDING_SETTINGS["assurance_two"], max_length=80)
+    nav_home: str = Field(default=DEFAULT_LANDING_SETTINGS["nav_home"], max_length=30)
+    nav_features: str = Field(default=DEFAULT_LANDING_SETTINGS["nav_features"], max_length=30)
+    nav_how: str = Field(default=DEFAULT_LANDING_SETTINGS["nav_how"], max_length=30)
+    nav_about: str = Field(default=DEFAULT_LANDING_SETTINGS["nav_about"], max_length=30)
+    show_features: bool = DEFAULT_LANDING_SETTINGS["show_features"]
+    features_title: str = Field(default=DEFAULT_LANDING_SETTINGS["features_title"], max_length=100)
+    features_highlight: str = Field(default=DEFAULT_LANDING_SETTINGS["features_highlight"], max_length=80)
+    features_description: str = Field(default=DEFAULT_LANDING_SETTINGS["features_description"], max_length=400)
+    show_how: bool = DEFAULT_LANDING_SETTINGS["show_how"]
+    how_title: str = Field(default=DEFAULT_LANDING_SETTINGS["how_title"], max_length=120)
+    how_description: str = Field(default=DEFAULT_LANDING_SETTINGS["how_description"], max_length=400)
+    show_about: bool = DEFAULT_LANDING_SETTINGS["show_about"]
+    about_title: str = Field(default=DEFAULT_LANDING_SETTINGS["about_title"], max_length=120)
+    about_description: str = Field(default=DEFAULT_LANDING_SETTINGS["about_description"], max_length=400)
+    footer_text: str = Field(default=DEFAULT_LANDING_SETTINGS["footer_text"], max_length=120)
+    accent_color: str = Field(default=DEFAULT_LANDING_SETTINGS["accent_color"], pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
 class ActivationCodeRequest(BaseModel):
     staff_id: str
 
@@ -397,14 +467,21 @@ def user_profile(row: Dict[str, Any]) -> Dict[str, Any]:
         "role": row.get("role", "staff"),
         "role_label": ROLE_LABELS.get(row.get("role", "staff"), "Staf"),
         "supervised_departments": row.get("supervised_departments") or [],
+        "must_change_pin": bool(row.get("pin_change_required")),
     }
 
 
-async def get_current_user(request: Request) -> Dict[str, Any]:
-    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+def request_session_token(request: Request) -> str:
+    # An explicit per-tab session must override an older browser cookie.
+    # Embedded previews can retain cookies while blocking login cookie updates.
     authorization = request.headers.get("authorization", "")
-    if not token and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return request.cookies.get(SESSION_COOKIE_NAME, "")
+
+
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    token = request_session_token(request)
     if not token:
         raise HTTPException(401, "Silakan masuk untuk melanjutkan.")
 
@@ -419,18 +496,28 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
     if not user or not user.get("active", True) or not user.get("is_activated"):
         await db.auth_sessions.delete_one({"id": session.get("id")})
         raise HTTPException(401, "Akun tidak aktif. Hubungi Admin.")
+    if user.get("pin_change_required") and request.url.path not in {
+        "/api/auth/me", "/api/auth/change-pin",
+    }:
+        raise HTTPException(403, "PIN sementara harus diganti sebelum menggunakan aplikasi.")
     return user
 
 
 async def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    if user.get("role") != "admin":
+    if user.get("role") not in ADMIN_ROLES:
         raise HTTPException(403, "Fitur ini hanya dapat digunakan Admin.")
+    return user
+
+
+async def require_super_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if user.get("role") != "super_admin":
+        raise HTTPException(403, "Fitur ini hanya dapat digunakan Super Admin.")
     return user
 
 
 def can_manage_staff_record(user: Dict[str, Any], staff_record: Dict[str, Any]) -> bool:
     role = user.get("role", "staff")
-    if role == "admin":
+    if role in ADMIN_ROLES:
         return True
     if staff_record.get("active", True) is False:
         return False
@@ -471,6 +558,7 @@ async def issue_activation_code(staff_record: Dict[str, Any], issued_by: str) ->
             "login_locked_until": "",
             "is_activated": False,
             "pin_hash": "",
+            "pin_change_required": False,
         }},
     )
     return {"staff_id": staff_record["id"], "activation_code": code, "expires_at": iso_utc(expires)}
@@ -590,7 +678,10 @@ async def _sync_seed_data(force: bool = False):
             staff_id = slot_id if slot_id not in staff_by_id else f"staff-{uuid.uuid4()}"
             existing = None
 
-        role_text = row.get("role") or (existing or {}).get("role") or "staff"
+        role_text = (
+            "super_admin" if existing and (existing.get("system_super_admin") or existing.get("role") == "super_admin")
+            else row.get("role") or (existing or {}).get("role") or "staff"
+        )
         role = normalize_role(role_text)
         if role not in VALID_ROLES:
             role = "staff"
@@ -658,7 +749,8 @@ async def _sync_seed_data(force: bool = False):
     # Orang yang tidak lagi ada pada roster dinonaktifkan, bukan dihapus, agar
     # laporan historis tetap terhubung ke identitas yang benar.
     for row in await db.staff.find(
-        {"seed_key": {"$exists": True}},
+        # Super Admin is a system account, not tied to a staff roster import.
+        {"seed_key": {"$exists": True}, "role": {"$ne": "super_admin"}, "system_super_admin": {"$ne": True}},
         {"_id": 0, "id": 1, "active": 1, "archived": 1},
     ).to_list(5000):
         if row["id"] not in official_ids and (row.get("active", True) or not row.get("archived")):
@@ -685,8 +777,11 @@ async def _sync_seed_data(force: bool = False):
         }]
         await db.tasks.update_one({"id": t["id"]}, {"$set": {"target_history": history}})
 
-    if await db.tasks.count_documents({}) == 0:
-        staff = await db.staff.find({}, {"_id": 0}).to_list(4)
+    if (
+        await db.tasks.count_documents({}) == 0
+        and await db.staff.count_documents({"active": {"$ne": False}}) >= 4
+    ):
+        staff = await db.staff.find({"active": {"$ne": False}}, {"_id": 0}).to_list(4)
         now = datetime.now(timezone.utc).isoformat()
         t1 = (jakarta_now - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M")
         t2 = (jakarta_now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
@@ -714,9 +809,12 @@ async def root():
 async def auth_setup_status():
     await seed_data()
     admin_count = await db.staff.count_documents({"role": "admin", "is_activated": True, "active": {"$ne": False}})
+    super_admin_count = await db.staff.count_documents({"role": "super_admin", "is_activated": True, "active": {"$ne": False}})
     return {
         "initial_admin_required": admin_count == 0,
         "initial_admin_setup_enabled": bool(os.environ.get("AUTH_SETUP_SECRET")),
+        "initial_super_admin_required": super_admin_count == 0,
+        "initial_super_admin_setup_enabled": bool(os.environ.get("AUTH_SETUP_SECRET")),
     }
 
 
@@ -794,6 +892,101 @@ async def bootstrap_admin(payload: BootstrapAdminRequest):
     }
 
 
+@api.post("/auth/bootstrap-super-admin")
+async def bootstrap_super_admin(payload: BootstrapSuperAdminRequest):
+    """Owner-only first-run setup for a Super Admin using an official NIP/NIK."""
+    await seed_data()
+    setup_secret = os.environ.get("AUTH_SETUP_SECRET", "")
+    if not setup_secret:
+        raise HTTPException(503, "Penyiapan Super Admin belum diaktifkan oleh pengelola sistem.")
+    if not constant_time_equal(payload.setup_secret, setup_secret):
+        raise HTTPException(403, "Kode penyiapan tidak cocok.")
+    if await db.staff.count_documents({"role": "super_admin", "is_activated": True, "active": {"$ne": False}}):
+        raise HTTPException(409, "Super Admin aktif sudah tersedia.")
+
+    nip = normalize_identity(payload.nip)
+    if not valid_identity(nip):
+        raise HTTPException(400, "Masukkan NIP 18 digit atau NIK 16 digit yang valid.")
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Nama Super Admin wajib diisi.")
+
+    existing = await db.staff.find_one({"nip": nip}, {"_id": 0})
+    if existing and existing.get("active", True) is False:
+        raise HTTPException(400, "Akun dengan NIP/NIK tersebut sedang nonaktif.")
+    if existing:
+        # Pemilik sistem boleh mempromosikan akun roster yang identitasnya cocok.
+        await db.staff.update_one({"id": existing["id"]}, {"$set": {
+            "role": "super_admin", "system_super_admin": True, "supervised_departments": [],
+        }})
+        staff_id = existing["id"]
+    else:
+        staff_id = f"super-admin-{uuid.uuid4()}"
+        doc = {
+            "id": staff_id,
+            "name": name,
+            "department": "Admin",
+            "initials": make_initials(name),
+            "active": True,
+            "nip": nip,
+            "id_type": infer_id_type(nip),
+            "keterangan": "Super Admin",
+            "position": "Super Admin",
+            "role": "super_admin",
+            "supervised_departments": [],
+            "is_activated": False,
+            "pin_hash": "",
+            "pin_change_required": False,
+            "source": "owner_super_admin_setup",
+            "system_super_admin": True,
+        }
+        await db.staff.insert_one(doc)
+
+    fresh = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    code_info = await issue_activation_code(fresh, "initial-super-admin-setup")
+    return {
+        "ok": True,
+        "message": "Akun Super Admin disiapkan. Kode aktivasi hanya ditampilkan satu kali.",
+        "staff_id": staff_id,
+        "name": fresh.get("name"),
+        "role": "super_admin",
+        "activation_code": code_info["activation_code"],
+        "expires_at": code_info["expires_at"],
+    }
+
+
+@api.get("/public/landing-settings")
+async def get_landing_settings():
+    stored = await db.settings.find_one({"key": LANDING_SETTINGS_KEY}, {"_id": 0})
+    values = stored.get("values") if stored else None
+    return {**DEFAULT_LANDING_SETTINGS, **(values or {})}
+
+
+@api.put("/admin/landing-settings")
+async def update_landing_settings(
+    payload: LandingPageSettings,
+    user: Dict[str, Any] = Depends(require_super_admin),
+):
+    values = payload.model_dump()
+    for key, value in values.items():
+        if isinstance(value, str):
+            values[key] = value.strip()
+    values["accent_color"] = values["accent_color"].upper()
+    if not re.fullmatch(r"#[0-9A-F]{6}", values["accent_color"]):
+        raise HTTPException(400, "Warna aksen harus berupa kode HEX, contoh #2458EC.")
+    await db.settings.update_one(
+        {"key": LANDING_SETTINGS_KEY},
+        {"$set": {
+            "key": LANDING_SETTINGS_KEY,
+            "values": values,
+            "updated_at": iso_utc(utc_now()),
+            "updated_by": user["id"],
+        }},
+        upsert=True,
+    )
+    return values
+
+
 @api.post("/auth/activate")
 async def activate_account(payload: AuthActivateRequest):
     nip = normalize_identity(payload.nip)
@@ -831,6 +1024,7 @@ async def activate_account(payload: AuthActivateRequest):
             "$set": {
                 "pin_hash": hash_credential(payload.pin),
                 "is_activated": True,
+                "pin_change_required": False,
                 "login_failed_attempts": 0,
                 "login_locked_until": "",
                 "activation_code_attempts": 0,
@@ -843,6 +1037,28 @@ async def activate_account(payload: AuthActivateRequest):
         },
     )
     return {"ok": True, "message": "PIN berhasil dibuat. Silakan masuk menggunakan NIP/NIK dan PIN baru."}
+
+
+@api.post("/auth/change-pin")
+async def change_pin(payload: ChangePinRequest, user: Dict[str, Any] = Depends(get_current_user)):
+    if not user.get("pin_change_required"):
+        raise HTTPException(409, "Akun ini tidak memiliki PIN sementara yang perlu diganti.")
+    if not valid_pin(payload.current_pin) or not verify_credential(payload.current_pin, user.get("pin_hash", "")):
+        raise HTTPException(401, "PIN sementara tidak cocok.")
+    if not valid_pin(payload.new_pin):
+        raise HTTPException(400, "PIN baru harus terdiri dari tepat 6 angka.")
+    if payload.new_pin in {"123456", "111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "000000"}:
+        raise HTTPException(400, "Pilih PIN enam digit yang tidak mudah ditebak.")
+    if payload.new_pin == payload.current_pin:
+        raise HTTPException(400, "PIN baru harus berbeda dari PIN sementara.")
+    if payload.new_pin != payload.pin_confirmation:
+        raise HTTPException(400, "Konfirmasi PIN baru tidak sama.")
+    await db.staff.update_one({"id": user["id"]}, {"$set": {
+        "pin_hash": hash_credential(payload.new_pin),
+        "pin_change_required": False,
+        "pin_last_changed_at": iso_utc(utc_now()),
+    }})
+    return {"ok": True, "message": "PIN baru berhasil disimpan."}
 
 
 @api.post("/auth/login")
@@ -891,15 +1107,20 @@ async def login(payload: AuthLoginRequest, request: Request, response: Response)
         samesite="lax",
         path="/",
     )
-    return {"ok": True, "user": user_profile(staff), "expires_at": iso_utc(expires)}
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    result = {"ok": True, "user": user_profile(staff), "expires_at": iso_utc(expires)}
+    # The embedded Arena preview may block partitioned cookies in its iframe.
+    # Expose the short-lived session token only in the explicitly enabled preview
+    # process; the frontend keeps it in sessionStorage and sends it as Bearer.
+    if os.environ.get("AUTH_PREVIEW_TOKEN_FALLBACK", "").lower() == "true":
+        result["session_token"] = token
+    return result
 
 
 @api.post("/auth/logout")
 async def logout(request: Request, response: Response):
-    token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    authorization = request.headers.get("authorization", "")
-    if not token and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
+    token = request_session_token(request)
     if token:
         await db.auth_sessions.delete_one({"token_hash": hash_session_token(token)})
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", httponly=True, samesite="lax")
@@ -916,6 +1137,8 @@ async def create_activation_code(staff_id: str, user: Dict[str, Any] = Depends(r
     staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
     if not staff:
         raise HTTPException(404, "Staf tidak ditemukan.")
+    if staff.get("role") == "super_admin" and user.get("role") != "super_admin":
+        raise HTTPException(403, "Hanya Super Admin yang dapat menerbitkan ulang kredensial Super Admin.")
     if not valid_identity(staff.get("nip", "")):
         raise HTTPException(400, "Lengkapi NIP/NIK staf sebelum membuat kode aktivasi.")
     if not staff.get("active", True):
@@ -924,13 +1147,218 @@ async def create_activation_code(staff_id: str, user: Dict[str, Any] = Depends(r
     return {"ok": True, "name": staff.get("name"), **code_info}
 
 
+def is_demo_placeholder_identity(value: str, row: Optional[Dict[str, Any]] = None) -> bool:
+    digits = normalize_identity(value)
+    tagged = bool((row or {}).get("identity_is_placeholder")) or str((row or {}).get("credential_source") or "").startswith("demo")
+    # Pattern historically emitted by scripts/preview.py for missing official IDs.
+    return tagged or bool(re.fullmatch(r"1800000000\d{6}", digits))
+
+
+def generate_temporary_pin(used: set[str]) -> str:
+    weak = {"123456", "111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "000000"}
+    while True:
+        value = f"{randbelow(1_000_000):06d}"
+        if value not in used and value not in weak and len(set(value)) > 2:
+            used.add(value)
+            return value
+
+
+def build_temporary_credentials_pdf(rows: List[Dict[str, Any]], generated_at: datetime) -> bytes:
+    """Render a one-time in-memory PDF; plaintext PINs are never persisted."""
+    from xml.sax.saxutils import escape
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    output = io.BytesIO()
+    page = landscape(A4)
+    doc = SimpleDocTemplate(
+        output, pagesize=page, rightMargin=12 * mm, leftMargin=12 * mm,
+        topMargin=12 * mm, bottomMargin=14 * mm,
+        title="LOKA-Kin — PIN sementara pegawai",
+        author="LOKA-Kin Super Admin",
+    )
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("CredentialTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=15, leading=18, textColor=colors.HexColor("#15345B"), alignment=TA_LEFT, spaceAfter=4)
+    subtitle = ParagraphStyle("CredentialSubtitle", parent=styles["BodyText"], fontName="Helvetica", fontSize=8, leading=11, textColor=colors.HexColor("#526174"), spaceAfter=5)
+    warning = ParagraphStyle("CredentialWarning", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=8, leading=11, textColor=colors.HexColor("#8A1C1C"), backColor=colors.HexColor("#FFF2F2"), borderColor=colors.HexColor("#F2B8B8"), borderWidth=0.6, borderPadding=7, spaceAfter=8)
+    cell = ParagraphStyle("CredentialCell", parent=styles["BodyText"], fontName="Helvetica", fontSize=7.4, leading=9, textColor=colors.HexColor("#172337"))
+    pin_style = ParagraphStyle("CredentialPin", parent=cell, fontName="Helvetica-Bold", fontSize=9, alignment=TA_CENTER, textColor=colors.HexColor("#0B4BAA"))
+    center = ParagraphStyle("CredentialCenter", parent=cell, alignment=TA_CENTER)
+
+    story = [
+        Paragraph("LOKA-Kin — Daftar NIP/NIK &amp; PIN Sementara", title),
+        Paragraph(f"Loka Rehabilitasi Narkotika Kalianda · {len(rows)} pegawai · {generated_at.strftime('%d-%m-%Y %H:%M')} WIB", subtitle),
+        Paragraph("RAHASIA — dibagikan secara pribadi kepada pegawai terkait. PIN pada dokumen ini baru saja diterbitkan/dirotasi, hanya ditampilkan sekali, dan wajib diganti setelah masuk. PIN sebelumnya tidak dapat dipulihkan karena hanya disimpan sebagai hash.", warning),
+        Spacer(1, 2 * mm),
+    ]
+    data = [[Paragraph(f"<b>{escape(text)}</b>", center if index in {0, 5} else cell) for index, text in enumerate(("No", "Nama pegawai", "Departemen", "Peran", "NIP/NIK", "PIN sementara", "Status PIN"))]]
+    for number, row in enumerate(rows, start=1):
+        role_label = ROLE_LABELS.get(row.get("role", "staff"), "Staf")
+        status = "PIN dirotasi" if row.get("was_activated") else "PIN awal diterbitkan"
+        data.append([
+            Paragraph(str(number), center),
+            Paragraph(escape(str(row.get("name", ""))), cell),
+            Paragraph(escape(str(row.get("department", "-"))), cell),
+            Paragraph(escape(role_label), cell),
+            Paragraph(escape(f"{row.get('id_type', 'NIP/NIK')} · {row.get('nip', '')}"), cell),
+            Paragraph(escape(row["temporary_pin"]), pin_style),
+            Paragraph(escape(status), cell),
+        ])
+    widths = [10 * mm, 49 * mm, 42 * mm, 34 * mm, 48 * mm, 27 * mm, 38 * mm]
+    table = Table(data, colWidths=widths, repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#173B72")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CAD4E1")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FB")]),
+    ]))
+    story.append(table)
+
+    def footer(canvas, _document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#6B7280"))
+        canvas.drawString(12 * mm, 7 * mm, "RAHASIA · Jangan unggah ke repositori atau kanal publik")
+        canvas.drawRightString(page[0] - 12 * mm, 7 * mm, f"Halaman {_document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output.getvalue()
+
+
+@api.get("/admin/credentials/status")
+async def credentials_status(user: Dict[str, Any] = Depends(require_super_admin)):
+    records = await db.staff.find({"active": {"$ne": False}, "role": {"$ne": "super_admin"}}, {"_id": 0}).to_list(5000)
+    records.sort(key=staff_sort_key)
+    missing = [
+        {"id": row.get("id"), "name": row.get("name", "Tanpa nama")}
+        for row in records
+        if not valid_identity(row.get("nip", "")) or is_demo_placeholder_identity(row.get("nip", ""), row)
+    ]
+    valid_count = len(records) - len(missing)
+    return {
+        "total_staff": len(records),
+        "with_official_identity": valid_count,
+        "missing_or_placeholder_identity": len(missing),
+        "activated_accounts": sum(bool(row.get("is_activated") and row.get("pin_hash")) for row in records),
+        "pending_accounts": sum(not bool(row.get("is_activated") and row.get("pin_hash")) for row in records),
+        "ready_for_pin_pdf": bool(records) and not missing,
+        "missing_staff": missing,
+    }
+
+
+@api.post("/admin/credentials/rotate-pdf")
+async def rotate_credentials_and_download_pdf(user: Dict[str, Any] = Depends(require_super_admin)):
+    """Rotate all eligible staff PINs and stream their temporary values once."""
+    records = await db.staff.find({"active": {"$ne": False}, "role": {"$ne": "super_admin"}}, {"_id": 0}).to_list(5000)
+    records.sort(key=staff_sort_key)
+    if not records:
+        raise HTTPException(400, "Belum ada pegawai aktif untuk diekspor.")
+    missing = [row for row in records if not valid_identity(row.get("nip", "")) or is_demo_placeholder_identity(row.get("nip", ""), row)]
+    if missing:
+        raise HTTPException(status_code=409, detail={
+            "message": "PDF PIN belum dapat dibuat. Lengkapi NIP/NIK resmi untuk semua pegawai aktif; nomor contoh tidak diterima.",
+            "missing_staff": [{"id": row.get("id"), "name": row.get("name", "Tanpa nama")} for row in missing],
+        })
+    seen_ids = set()
+    duplicates = []
+    for row in records:
+        nip = normalize_identity(row.get("nip", ""))
+        if nip in seen_ids:
+            duplicates.append(row.get("name", "Tanpa nama"))
+        seen_ids.add(nip)
+    if duplicates:
+        raise HTTPException(409, detail={
+            "message": "Ada NIP/NIK duplikat. Perbaiki roster sebelum menerbitkan PIN.",
+            "duplicate_staff": duplicates,
+        })
+
+    issued_at = utc_now()
+    used: set[str] = set()
+    output_rows = []
+    for row in records:
+        temp_pin = generate_temporary_pin(used)
+        output_rows.append({
+            "id": row["id"],
+            "name": row.get("name", ""),
+            "department": row.get("department", ""),
+            "role": row.get("role", "staff"),
+            "nip": normalize_identity(row.get("nip", "")),
+            "id_type": row.get("id_type") or infer_id_type(row.get("nip", "")),
+            "temporary_pin": temp_pin,
+            "was_activated": bool(row.get("is_activated") and row.get("pin_hash")),
+        })
+    # Render before committing any PIN change so a PDF generation failure does not lock accounts.
+    pdf = build_temporary_credentials_pdf(output_rows, issued_at.astimezone(ZoneInfo("Asia/Jakarta")))
+    changed = []
+    try:
+        for row, exported in zip(records, output_rows):
+            await db.staff.update_one({"id": row["id"]}, {
+                "$set": {
+                    "pin_hash": hash_credential(exported["temporary_pin"]),
+                    "is_activated": True,
+                    "pin_change_required": True,
+                    "temporary_pin_issued_at": iso_utc(issued_at),
+                    "last_credential_issued_by": user["id"],
+                    "login_failed_attempts": 0,
+                    "login_locked_until": "",
+                },
+                "$unset": {
+                    "activation_code_hash": "",
+                    "activation_code_expires_at": "",
+                    "activation_code_issued_by": "",
+                },
+            })
+            changed.append(row)
+            await db.auth_sessions.delete_many({"staff_id": row["id"]})
+    except Exception:
+        # Best-effort rollback if a later row fails during the multi-document update.
+        for row in changed:
+            restore = {key: row[key] for key in (
+                "pin_hash", "is_activated", "pin_change_required", "temporary_pin_issued_at",
+                "last_credential_issued_by", "login_failed_attempts", "login_locked_until",
+                "activation_code_hash", "activation_code_expires_at", "activation_code_issued_by",
+            ) if key in row}
+            await db.staff.update_one({"id": row["id"]}, {"$set": restore})
+        raise
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "event": "staff_temporary_pins_rotated_and_exported",
+        "actor_id": user["id"],
+        "staff_ids": [row["id"] for row in records],
+        "count": len(records),
+        "created_at": iso_utc(issued_at),
+        "plaintext_persisted": False,
+    })
+    filename = f"loka-kin-kredensial-{issued_at.astimezone(ZoneInfo('Asia/Jakarta')).strftime('%Y%m%d-%H%M')}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @api.get("/staff", response_model=List[Staff])
 async def get_staff(include_inactive: bool = True, user: Dict[str, Any] = Depends(get_current_user)):
     """Staf only see themselves; supervisors can see all names; only Admin sees NIP/NIK."""
     await seed_data()
     if user.get("role") == "staff":
         query: Dict[str, Any] = {"id": user["id"]}
-    elif user.get("role") == "admin" and include_inactive:
+    elif user.get("role") in ADMIN_ROLES and include_inactive:
         query = {}
     elif user.get("role") in SUPERVISOR_ROLES and include_inactive:
         query = {}
@@ -938,7 +1366,7 @@ async def get_staff(include_inactive: bool = True, user: Dict[str, Any] = Depend
         query = {"active": True}
     rows = await db.staff.find(query, {"_id": 0}).to_list(500)
     rows.sort(key=staff_sort_key)
-    reveal_identity = user.get("role") == "admin"
+    reveal_identity = user.get("role") in ADMIN_ROLES
     return [
         public_staff(
             row,
@@ -959,6 +1387,8 @@ async def create_staff(payload: StaffCreate, user: Dict[str, Any] = Depends(requ
     role = normalize_role(payload.role)
     if role not in VALID_ROLES:
         raise HTTPException(400, "Role tidak valid")
+    if role == "super_admin" and user.get("role") != "super_admin":
+        raise HTTPException(403, "Hanya Super Admin yang dapat menetapkan role Super Admin.")
     nip = normalize_identity(payload.nip)
     if nip and not valid_identity(nip):
         raise HTTPException(400, "NIP harus 18 digit atau NIK 16 digit.")
@@ -1023,6 +1453,8 @@ async def import_staff(payload: StaffImportRequest, user: Dict[str, Any] = Depen
         role = normalize_role(raw_role) if raw_role else ""
         if raw_role and role not in VALID_ROLES:
             raise HTTPException(400, f"Role tidak valid untuk {name}.")
+        if role == "super_admin" and user.get("role") != "super_admin":
+            raise HTTPException(403, "Hanya Super Admin yang dapat menetapkan role Super Admin.")
         invalid_supervised = [dept for dept in row.supervised_departments if dept not in DEPARTMENTS]
         if invalid_supervised:
             raise HTTPException(400, f"Departemen pengawasan tidak valid untuk {name}: {invalid_supervised[0]}")
@@ -1259,13 +1691,21 @@ async def update_staff(staff_id: str, payload: StaffUpdate, user: Dict[str, Any]
     existing = await db.staff.find_one({"id": staff_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Staf tidak ditemukan")
+    if existing.get("role") == "super_admin" and user.get("role") != "super_admin":
+        raise HTTPException(403, "Hanya Super Admin yang dapat mengubah akun Super Admin.")
 
     changes = payload.model_dump(exclude_unset=True, exclude_none=True)
-    removes_active_admin = existing.get("role") == "admin" and existing.get("active", True) and (
-        changes.get("role", "admin") != "admin" or changes.get("active") is False
-    )
-    if removes_active_admin and await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
+    requested_role = normalize_role(changes.get("role", existing.get("role", "staff")))
+    if requested_role == "super_admin" and user.get("role") != "super_admin":
+        raise HTTPException(403, "Hanya Super Admin yang dapat menetapkan role Super Admin.")
+    if existing.get("role") == "admin" and existing.get("active", True) and (
+        requested_role != "admin" or changes.get("active") is False
+    ) and await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
         raise HTTPException(400, "Promosikan atau aktifkan Admin lain sebelum menonaktifkan role Admin terakhir.")
+    if existing.get("role") == "super_admin" and existing.get("active", True) and (
+        requested_role != "super_admin" or changes.get("active") is False
+    ) and await db.staff.count_documents({"role": "super_admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
+        raise HTTPException(400, "Super Admin aktif terakhir tidak dapat dinonaktifkan atau diturunkan perannya.")
     if "name" in changes:
         name = str(changes["name"]).strip()
         if not name:
@@ -1300,7 +1740,11 @@ async def update_staff(staff_id: str, payload: StaffUpdate, user: Dict[str, Any]
         role = normalize_role(changes["role"])
         if role not in VALID_ROLES:
             raise HTTPException(400, "Role tidak valid")
+        if role == "super_admin" and user.get("role") != "super_admin":
+            raise HTTPException(403, "Hanya Super Admin yang dapat menetapkan role Super Admin.")
         changes["role"] = role
+        if role != "super_admin" and existing.get("system_super_admin"):
+            changes["system_super_admin"] = False
         if role not in SUPERVISOR_ROLES:
             changes["supervised_departments"] = []
     if "supervised_departments" in changes:
@@ -1327,8 +1771,12 @@ async def delete_staff(staff_id: str, user: Dict[str, Any] = Depends(require_adm
     staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
     if not staff:
         raise HTTPException(404, "Staf tidak ditemukan")
+    if staff.get("role") == "super_admin" and user.get("role") != "super_admin":
+        raise HTTPException(403, "Hanya Super Admin yang dapat menghapus akun Super Admin.")
     if staff.get("role") == "admin" and staff.get("active", True) and staff.get("is_activated") and await db.staff.count_documents({"role": "admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
         raise HTTPException(400, "Admin aktif terakhir tidak dapat dihapus atau dinonaktifkan.")
+    if staff.get("role") == "super_admin" and staff.get("active", True) and staff.get("is_activated") and await db.staff.count_documents({"role": "super_admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
+        raise HTTPException(400, "Super Admin aktif terakhir tidak dapat dihapus atau dinonaktifkan.")
     await db.auth_sessions.delete_many({"staff_id": staff_id})
     if await db.tasks.count_documents({"staff_id": staff_id}) > 0:
         await db.staff.update_one(
@@ -1408,13 +1856,13 @@ async def update_task(task_id: str, payload: TaskCreate, user: Dict[str, Any] = 
     existing_staff = await db.staff.find_one({"id": existing.get("staff_id")}, {"_id": 0})
     if not existing_staff or not can_manage_staff_record(user, existing_staff):
         raise HTTPException(403, "Anda tidak berhak mengubah laporan staf ini.")
-    if normalize_task_status(existing.get("status")) == "finish" and user.get("role") != "admin":
+    if normalize_task_status(existing.get("status")) == "finish" and user.get("role") not in ADMIN_ROLES:
         raise HTTPException(403, "Laporan Finish terkunci. Hubungi Admin untuk koreksi.")
 
     doc = payload.model_dump()
     # Hanya Admin yang boleh memindahkan laporan ke staf lain. Pengguna lain
     # tetap terikat pada pemilik laporan yang sudah tersimpan di server.
-    if user.get("role") != "admin":
+    if user.get("role") not in ADMIN_ROLES:
         doc["staff_id"] = existing["staff_id"]
     else:
         target_staff = await db.staff.find_one({"id": doc.get("staff_id")}, {"_id": 0})
@@ -1498,7 +1946,7 @@ async def delete_task(task_id: str, user: Dict[str, Any] = Depends(get_current_u
     staff = await db.staff.find_one({"id": task.get("staff_id")}, {"_id": 0})
     if not staff or not can_manage_staff_record(user, staff):
         raise HTTPException(403, "Anda tidak berhak menghapus laporan staf ini.")
-    if normalize_task_status(task.get("status")) == "finish" and user.get("role") != "admin":
+    if normalize_task_status(task.get("status")) == "finish" and user.get("role") not in ADMIN_ROLES:
         raise HTTPException(403, "Laporan Finish terkunci. Hubungi Admin untuk koreksi.")
     result = await db.tasks.delete_one({"id": task_id})
     if not result.deleted_count:

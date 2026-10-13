@@ -35,3 +35,43 @@ Jangan masukkan PIN ke spreadsheet. Kode aktivasi berlaku 24 jam dan hanya ditam
 - Admin mengelola roster, role, pemetaan departemen, aktivasi/reset, dan seluruh laporan.
 
 Tes otorisasi terisolasi tersedia di `backend/tests/test_auth_access.py`. Tes API integrasi terhadap server aktif pada `backend/tests/backend_test.py` memerlukan `LOKA_TEST_ADMIN_NIP` dan `LOKA_TEST_ADMIN_PIN`.
+
+## Super Admin dan pengelolaan website
+
+- Siapkan `AUTH_SETUP_SECRET` hanya di environment server (gunakan nilai acak kuat; jangan commit atau bagikan lewat kanal umum).
+- Pada halaman Masuk pilih **Penyiapan Super Admin pertama**, lalu masukkan nama, **NIP/NIK resmi**, dan secret tersebut. Sistem menerbitkan kode aktivasi satu kali; pemilik akun menggunakannya untuk menetapkan PIN pribadi.
+- Super Admin mendapat menu **Pengaturan website** untuk mengubah judul, teks, navigasi, visibilitas bagian landing page, dan warna aksen. Perubahan tersimpan di database dan langsung digunakan oleh landing page.
+- Akun staf tetap dapat masuk untuk laporan sesuai perannya. Hanya role **Super Admin** yang dapat mengubah landing page atau mengunduh daftar PIN sementara.
+
+## PDF kredensial pegawai
+
+Sebelum menerbitkan PDF, impor roster berisi **NIP/NIK resmi** melalui menu **Daftar staf**. Aplikasi tidak mengarang nomor pemerintah; NIP/NIK yang kosong, duplikat, atau placeholder demo akan memblokir penerbitan.
+
+Di **Pengaturan website → Kredensial pegawai**, tombol **Rotasi & unduh PDF** menerbitkan PIN sementara acak untuk semua pegawai aktif (kecuali akun Super Admin), mencabut sesi lama, lalu mengunduh PDF satu kali yang memuat NIP/NIK, PIN sementara, dan status akun. Operasi ini **mereset seluruh PIN pegawai**; PIN lama tidak dapat ditampilkan karena hanya tersimpan sebagai hash. Pegawai wajib mengganti PIN sementara saat login pertama. PDF tidak disimpan ulang di server dan harus dibagikan secara pribadi.
+
+## Sesi pada preview iframe
+
+`./preview.sh` mengaktifkan `AUTH_PREVIEW_TOKEN_FALLBACK=true` untuk API dan
+`REACT_APP_PREVIEW_TOKEN_FALLBACK=true` untuk kedua frontend preview (port 3000
+serta build statis di port 8000). Token disimpan per tab, bukan sebagai sesi
+bersama di server. Token Bearer yang dikirim eksplisit mengungguli cookie lama;
+logout mencabut token tersebut. Bila penyimpanan iframe diblokir, sesi dapat
+berjalan di memori tab tetapi perlu login ulang setelah reload.
+
+**Jangan aktifkan kedua flag ini pada deployment produksi.** Build produksi
+biasa menggunakan cookie HttpOnly dan tidak menerima token dalam respons login.
+Setelah pembaruan preview, tutup tab lama dan buka ulang preview untuk memuat
+bundle terbaru. Tidak perlu mengubah PIN atau mengaktifkan ulang Super Admin.
+
+Pemeriksaan regresi:
+
+```bash
+./.venv/bin/python -m pytest backend/tests/test_auth_access.py -q
+(cd frontend && CI=true yarn test --watchAll=false --runInBand)
+```
+
+Tes integrasi `backend/tests/backend_test.py` mengubah roster dan laporan.
+Jalankan **hanya terhadap server dengan database pengujian terpisah**, bukan
+preview berisi data pegawai asli. Akun Super Admin tidak boleh dinonaktifkan
+atau diturunkan perannya oleh impor/reset roster; perubahan akun dilakukan
+melalui pengelolaan akun dengan pemeriksaan hak akses.

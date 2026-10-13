@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowRight,
@@ -17,11 +17,38 @@ import {
 } from "lucide-react";
 import "./LandingPage.css";
 
-const navLinks = [
-  { label: "Home", href: "#home" },
-  { label: "Fitur", href: "#fitur" },
-  { label: "Cara kerja", href: "#cara-kerja" },
-  { label: "Tentang", href: "#tentang" },
+const FALLBACK_LANDING_SETTINGS = {
+  brand_name: "Loka-Kin",
+  hero_kicker: "PLATFORM KINERJA TIM TERINTEGRASI",
+  hero_title: "Dorong Kinerja Tim",
+  hero_highlight: "Menjadi Lebih Optimal",
+  hero_description: "Platform kinerja karyawan yang memudahkan penetapan target, pelacakan kemajuan, dan pengakuan prestasi secara real-time.",
+  hero_cta: "Masuk",
+  assurance_one: "Pantau progres real-time",
+  assurance_two: "Laporan lebih terukur",
+  nav_home: "Home",
+  nav_features: "Fitur",
+  nav_how: "Cara kerja",
+  nav_about: "Tentang",
+  show_features: true,
+  features_title: "Kerja Tim Menjadi Lebih",
+  features_highlight: "Terarah",
+  features_description: "LOKA-Kin membantu tim menyusun target, menjalankan pekerjaan, dan melihat hasilnya dengan lebih jelas.",
+  show_how: true,
+  how_title: "Dari rencana menjadi hasil nyata.",
+  how_description: "Semua orang tahu apa yang dikerjakan, siapa penanggung jawabnya, dan sejauh mana progresnya.",
+  show_about: true,
+  about_title: "Bangun ritme kerja yang lebih baik bersama LOKA-Kin.",
+  about_description: "Satukan target, progres, dan capaian tim dalam satu tempat.",
+  footer_text: "© LOKA-Kin. Loka Rehabilitasi Narkotika Kalianda.",
+  accent_color: "#2458EC",
+};
+
+const landingNavigation = [
+  { key: "nav_home", href: "#home", enabled: true },
+  { key: "nav_features", href: "#fitur", enabledBy: "show_features" },
+  { key: "nav_how", href: "#cara-kerja", enabledBy: "show_how" },
+  { key: "nav_about", href: "#tentang", enabledBy: "show_about" },
 ];
 
 const features = [
@@ -176,8 +203,50 @@ function DashboardArtwork() {
   );
 }
 
-export default function LandingPage({ onLogin, authenticated = false }) {
+export default function LandingPage({ onLogin, authenticated = false, settings = {} }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("#home");
+  const pageRef = useRef(null);
+
+  const navigateToSection = useCallback((href, updateHistory = true) => {
+    if (!["#home", "#fitur", "#cara-kerja", "#tentang"].includes(href)) return;
+    const section = pageRef.current?.querySelector(href);
+    if (!section) return;
+    setMobileMenuOpen(false);
+    setActiveSection(href);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    section.scrollIntoView?.({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+    section.focus({ preventScroll: true });
+    if (updateHistory && window.location.hash !== href) {
+      try {
+        // Update this app's URL, never the Arena parent frame's navigation.
+        window.history.pushState(null, "", href);
+      } catch {
+        // Scrolling still works when an embedded browser restricts history.
+      }
+    }
+  }, []);
+
+  const handleSectionClick = (event, href) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigateToSection(href);
+  };
+
+  useEffect(() => {
+    const restoreSection = () => navigateToSection(window.location.hash || "#home", false);
+    if (window.location.hash) restoreSection();
+    window.addEventListener("hashchange", restoreSection);
+    window.addEventListener("popstate", restoreSection);
+    return () => {
+      window.removeEventListener("hashchange", restoreSection);
+      window.removeEventListener("popstate", restoreSection);
+    };
+  }, [navigateToSection, settings?.show_features, settings?.show_how, settings?.show_about]);
+  const content = { ...FALLBACK_LANDING_SETTINGS, ...(settings || {}) };
+  const navLinks = landingNavigation
+    .filter((link) => link.enabled || content[link.enabledBy])
+    .map((link) => ({ label: content[link.key], href: link.href }));
 
   const openDashboard = () => {
     setMobileMenuOpen(false);
@@ -185,8 +254,8 @@ export default function LandingPage({ onLogin, authenticated = false }) {
   };
 
   return (
-    <div className="landing-page">
-      <section className="landing-stage" id="home">
+    <div ref={pageRef} className="landing-page" style={{ "--landing-primary": content.accent_color || "#2458EC" }}>
+      <section className="landing-stage" id="home" tabIndex={-1}>
         <div className="landing-frame">
           <div className="landing-decoration landing-decoration-coin coin-one" aria-hidden="true">✦</div>
           <div className="landing-decoration landing-decoration-coin coin-two" aria-hidden="true">◉</div>
@@ -195,9 +264,9 @@ export default function LandingPage({ onLogin, authenticated = false }) {
           <div className="landing-decoration landing-decoration-spark spark-two" aria-hidden="true">✧</div>
 
           <header className="landing-header">
-            <a className="landing-brand" href="#home" aria-label="LOKA-Kin beranda" onClick={() => setMobileMenuOpen(false)}>
+            <a className="landing-brand" href="#home" aria-label="LOKA-Kin beranda" onClick={(event) => handleSectionClick(event, "#home")}>
               <span className="landing-brand-mark"><ShieldCheck size={24} strokeWidth={2.7} /></span>
-              <span className="landing-brand-name">Loka<span>-Kin</span></span>
+              <span className="landing-brand-name">{content.brand_name}</span>
             </a>
 
             <button
@@ -211,12 +280,13 @@ export default function LandingPage({ onLogin, authenticated = false }) {
             </button>
 
             <nav className={mobileMenuOpen ? "landing-nav is-open" : "landing-nav"} aria-label="Navigasi utama">
-              {navLinks.map((link, index) => (
+              {navLinks.map((link) => (
                 <a
-                  className={index === 0 ? "landing-nav-link is-active" : "landing-nav-link"}
+                  className={activeSection === link.href ? "landing-nav-link is-active" : "landing-nav-link"}
+                  aria-current={activeSection === link.href ? "location" : undefined}
                   href={link.href}
                   key={link.href}
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={(event) => handleSectionClick(event, link.href)}
                 >
                   {link.label}
                 </a>
@@ -224,9 +294,9 @@ export default function LandingPage({ onLogin, authenticated = false }) {
             </nav>
 
             <div className="landing-header-actions">
-              <a className="landing-home-quicklink" href="#home" data-testid="landing-home-quicklink" onClick={() => setMobileMenuOpen(false)}>Home</a>
+              <a className="landing-home-quicklink" href="#home" data-testid="landing-home-quicklink" onClick={(event) => handleSectionClick(event, "#home")}>{content.nav_home}</a>
               <button className="landing-header-cta" type="button" onClick={openDashboard}>
-                {authenticated ? "Dashboard" : "Masuk"} <ArrowUpRight size={15} />
+                {authenticated ? "Dashboard" : content.hero_cta} <ArrowUpRight size={15} />
               </button>
             </div>
           </header>
@@ -234,20 +304,18 @@ export default function LandingPage({ onLogin, authenticated = false }) {
           <main>
             <div className="landing-hero">
               <div className="hero-copy">
-                <div className="hero-kicker"><Sparkles size={14} /> PLATFORM KINERJA TIM TERINTEGRASI</div>
-                <h1>Dorong Kinerja Tim <span>Menjadi Lebih Tinggi</span></h1>
-                <p className="hero-description">
-                  Platform kinerja karyawan yang memudahkan penetapan target, pelacakan kemajuan, dan pengakuan prestasi secara real-time.
-                </p>
+                <div className="hero-kicker"><Sparkles size={14} /> {content.hero_kicker}</div>
+                <h1>{content.hero_title} <span>{content.hero_highlight}</span></h1>
+                <p className="hero-description">{content.hero_description}</p>
                 <div className="hero-actions">
                   <button className="hero-button hero-button-start" type="button" onClick={openDashboard}>
-                    {authenticated ? "Buka dashboard" : "Masuk"} <ArrowRight size={17} />
+                    {authenticated ? "Buka dashboard" : content.hero_cta} <ArrowRight size={17} />
                   </button>
                 </div>
                 <div className="hero-assurance">
-                  <span><CheckCircle2 size={15} /> Pantau progres real-time</span>
+                  <span><CheckCircle2 size={15} /> {content.assurance_one}</span>
                   <i />
-                  <span><CheckCircle2 size={15} /> Laporan lebih terukur</span>
+                  <span><CheckCircle2 size={15} /> {content.assurance_two}</span>
                 </div>
               </div>
               <DashboardArtwork />
@@ -260,11 +328,11 @@ export default function LandingPage({ onLogin, authenticated = false }) {
         </div>
       </section>
 
-      <section className="landing-features landing-section" id="fitur">
+      {content.show_features && <section className="landing-features landing-section" id="fitur" tabIndex={-1}>
         <div className="landing-section-heading">
           <span className="landing-section-kicker">SATU RUANG KERJA, BANYAK KEMAJUAN</span>
-          <h2>Kerja tim terasa lebih <em>terarah</em></h2>
-          <p>LOKA-Kin membantu tim menyusun target, menjalankan pekerjaan, dan melihat hasilnya dengan lebih jelas.</p>
+          <h2>{content.features_title} <em>{content.features_highlight}</em></h2>
+          <p>{content.features_description}</p>
         </div>
         <div className="landing-feature-grid">
           {features.map(({ icon: Icon, tone, title, description }, index) => (
@@ -273,38 +341,38 @@ export default function LandingPage({ onLogin, authenticated = false }) {
               <span className="feature-number">0{index + 1}</span>
               <h3>{title}</h3>
               <p>{description}</p>
-              <a href="#cara-kerja" aria-label={`Pelajari ${title}`}><ArrowUpRight size={17} /></a>
+              <a href="#cara-kerja" onClick={(event) => handleSectionClick(event, "#cara-kerja")} aria-label={`Pelajari ${title}`}><ArrowUpRight size={17} /></a>
             </article>
           ))}
         </div>
-      </section>
+      </section>}
 
-      <section className="landing-how-it-works landing-section" id="cara-kerja">
+      {content.show_how && <section className="landing-how-it-works landing-section" id="cara-kerja" tabIndex={-1}>
         <div className="how-copy">
           <span className="landing-section-kicker">ALUR YANG SEDERHANA</span>
-          <h2>Dari rencana menjadi hasil nyata.</h2>
-          <p>Semua orang tahu apa yang dikerjakan, siapa penanggung jawabnya, dan sejauh mana progresnya.</p>
+          <h2>{content.how_title}</h2>
+          <p>{content.how_description}</p>
           <button className="how-cta" type="button" onClick={openDashboard}>Jelajahi dashboard <ArrowRight size={16} /></button>
         </div>
         <div className="how-steps">
           <article><span>01</span><div><strong>Tetapkan target</strong><p>Buat laporan dan sasaran kerja yang jelas.</p></div></article>
           <article><span>02</span><div><strong>Pantau progres</strong><p>Perbarui status pekerjaan seiring proses berjalan.</p></div></article>
-          <article><span>03</span><div><strong>Rayakan capaian</strong><p>Lihat hasil kerja dan apresiasi kontribusi tim.</p></div></article>
+          <article><span>03</span><div><strong>Target Capaian</strong><p>Lihat hasil kerja dan apresiasi kontribusi tim.</p></div></article>
         </div>
-      </section>
+      </section>}
 
-      <section className="landing-cta-section" id="tentang">
+      {content.show_about && <section className="landing-cta-section" id="tentang" tabIndex={-1}>
         <div className="landing-cta-glow" />
         <span className="landing-section-kicker">MULAI LANGKAH BERIKUTNYA</span>
-        <h2>Bangun ritme kerja yang lebih baik bersama LOKA-Kin.</h2>
-        <p>Satukan target, progres, dan capaian tim dalam satu tempat.</p>
+        <h2>{content.about_title}</h2>
+        <p>{content.about_description}</p>
         <button type="button" onClick={openDashboard}>Buka dashboard <ArrowRight size={17} /></button>
-      </section>
+      </section>}
 
       <footer className="landing-footer">
-        <a className="landing-footer-brand" href="#home"><span className="landing-brand-mark"><ShieldCheck size={19} /></span> Loka-Kin</a>
-        <span>© {new Date().getFullYear()} LOKA-Kin.</span>
-        <a href="#home">Kembali ke atas <ChevronDown size={14} /></a>
+        <a className="landing-footer-brand" href="#home" onClick={(event) => handleSectionClick(event, "#home")}><span className="landing-brand-mark"><ShieldCheck size={19} /></span> {content.brand_name}</a>
+        <span>{content.footer_text.replace("©", `© ${new Date().getFullYear()}`)}</span>
+        <a href="#home" onClick={(event) => handleSectionClick(event, "#home")}>Kembali ke atas <ChevronDown size={14} /></a>
       </footer>
     </div>
   );
