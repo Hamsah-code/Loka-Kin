@@ -154,6 +154,29 @@ def test_preview_session_token_fallback_is_opt_in(api_client, monkeypatch):
 
 
 
+def test_preview_query_token_channel_replaces_stripped_authorization_header(api_client, monkeypatch):
+    """Gateway pratinjau dapat membuang header Authorization sekaligus memblokir cookie.
+
+    Kanal ``?access_token=`` menutupi keduanya, tetapi hanya selama mode pratinjau
+    dinyalakan sehingga deployment produksi tidak pernah menerima token di URL.
+    """
+    monkeypatch.setenv("AUTH_PREVIEW_TOKEN_FALLBACK", "true")
+    login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    token = login.json()["session_token"]
+    api_client.cookies.clear()
+
+    for path in ("auth/me", "tasks", "analytics"):
+        result = api_client.get(f"/api/{path}?access_token={token}")
+        assert result.status_code == 200, (path, result.text)
+    assert api_client.get("/api/auth/me").status_code == 401  # tanpa token: tetap anonim
+
+    assert api_client.post(f"/api/auth/logout?access_token={token}").status_code == 200
+    assert api_client.get(f"/api/auth/me?access_token={token}").status_code == 401
+
+    monkeypatch.delenv("AUTH_PREVIEW_TOKEN_FALLBACK")
+    assert api_client.get(f"/api/auth/me?access_token={token}").status_code == 401
+
+
 def test_explicit_session_overrides_stale_cookie_and_logout_revokes_it(api_client, monkeypatch):
     monkeypatch.setenv("AUTH_PREVIEW_TOKEN_FALLBACK", "true")
     login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})

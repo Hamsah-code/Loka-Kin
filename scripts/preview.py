@@ -98,6 +98,10 @@ def _bangun_app_preview():
             if scope["type"] != "http":
                 return await self.app(scope, receive, send)
             headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+            query = (scope.get("query_string") or b"").decode("latin-1")
+            # Pratinjau mengizinkan token sesi lewat ?access_token= karena gateway bisa
+            # membuang header Authorization; nilainya tidak pernah ditulis ke log.
+            tokenized = "access_token=" in query
             try:
                 with log_path.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps({
@@ -108,6 +112,7 @@ def _bangun_app_preview():
                         # Presence only: never log credentials, cookies or tokens.
                         "bearer_present": headers.get("authorization", "").lower().startswith("bearer "),
                         "session_cookie_present": "loka_kin_session=" in headers.get("cookie", ""),
+                        "query_token_present": tokenized,
                     }, ensure_ascii=False) + "\n")
             except Exception:
                 pass
@@ -125,7 +130,8 @@ def _bangun_app_preview():
                                 teks = f"{teks}; Partitioned"
                             value = teks.encode("latin-1")
                         baru.append((key, value))
-                    if not scope.get("path", "").startswith("/api"):
+                    # Jangan pernah menyimpan jawaban yang URL-nya memuat token pratinjau.
+                    if tokenized or not scope.get("path", "").startswith("/api"):
                         baru = [(key, value) for key, value in baru if key.lower() != b"cache-control"]
                         baru.append((b"cache-control", b"no-store"))
                     message["headers"] = baru
@@ -162,7 +168,9 @@ def serve() -> None:
     host = os.environ.get("PREVIEW_HOST", "0.0.0.0")
     port = int(os.environ.get("PREVIEW_PORT", "8000"))
     print(f"LOKA-Kin satu-origin http://{host}:{port} (API + dashboard)")
-    uvicorn.run(_bangun_app_preview(), host=host, port=port, log_level="info")
+    # Access log uvicorn mencetak URL mentah, termasuk ?access_token= dari pratinjau.
+    # .preview/requests.log mencatat jalur + keberadaan token saja (tanpa nilai).
+    uvicorn.run(_bangun_app_preview(), host=host, port=port, log_level="info", access_log=False)
 
 
 def proxy() -> None:

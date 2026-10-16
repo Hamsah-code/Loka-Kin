@@ -10,7 +10,7 @@ import LandingPage from "@/components/LandingPage";
 import AuthModal from "@/components/AuthModal";
 import SystemAdminPage from "@/components/SystemAdminPage";
 import ChangePinModal from "@/components/ChangePinModal";
-import { clearPreviewSessionToken, getPreviewSessionToken, previewTokenFallbackEnabled } from "@/previewSession";
+import { clearPreviewSessionToken, getPreviewSessionToken, PREVIEW_SESSION_HINT, previewSessionState, previewTokenFallbackEnabled, withPreviewAuth } from "@/previewSession";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
 axios.defaults.withCredentials = true;
@@ -23,13 +23,7 @@ if (axios[previewInterceptorKey] !== undefined) {
 if (previewTokenFallbackEnabled) {
   axios[previewInterceptorKey] = axios.interceptors.request.use((config) => {
     if (!config.url?.startsWith(`${API}/`)) return config;
-    const token = getPreviewSessionToken();
-    if (token) {
-      config.headers = config.headers || {};
-      if (typeof config.headers.set === "function") config.headers.set("Authorization", `Bearer ${token}`);
-      else config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
+    return withPreviewAuth(config, getPreviewSessionToken());
   });
 }
 const columns = [
@@ -1864,12 +1858,21 @@ export default function App() {
     } catch (error) {
       if (error.response?.status === 401) {
         if (previewTokenFallbackEnabled && requestToken !== getPreviewSessionToken()) return;
+        const state = previewSessionState();
         clearPreviewSessionToken();
         setAuthUser(null);
         setActive("home");
         setAuthModal("login");
         setTasks([]); setStaff([]);
-        toast.error("Sesi tidak dapat diverifikasi. Silakan masuk kembali.");
+        toast.error(
+          state.enabled && !state.hasToken
+            ? `Sesi tidak dapat dipertahankan di tab ini. ${PREVIEW_SESSION_HINT}`
+            : "Sesi berakhir atau dicabut. Silakan masuk kembali.",
+          {
+            duration: 14000,
+            action: { label: "Buka di tab baru", onClick: () => window.open(window.location.href, "_blank", "noopener") },
+          },
+        );
       } else {
         toast.error("Data belum dapat dimuat");
       }

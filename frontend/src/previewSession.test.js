@@ -47,4 +47,38 @@ describe("per-tab preview session", () => {
     expect(session.getPreviewSessionToken()).toBe("");
     expect(sessionStorage.length).toBe(0);
   });
+
+  test("sends the token as bearer header and as query parameter", () => {
+    session.savePreviewSessionToken("test-session");
+    const headers = { set: jest.fn() };
+    const config = session.withPreviewAuth({ url: "/api/tasks", headers }, session.getPreviewSessionToken());
+    expect(headers.set).toHaveBeenCalledWith("Authorization", "Bearer test-session");
+    expect(config.params).toEqual({ access_token: "test-session" });
+  });
+
+  test("plain config without axios headers still receives the query parameter", () => {
+    session.savePreviewSessionToken("test-session");
+    const config = session.withPreviewAuth({ params: { staff_id: "staff-2" } }, "test-session");
+    expect(config.headers.Authorization).toBe("Bearer test-session");
+    expect(config.params).toEqual({ staff_id: "staff-2", access_token: "test-session" });
+  });
+
+  test("an existing access_token parameter is never overwritten", () => {
+    const config = session.withPreviewAuth({ params: { access_token: "explicit" } }, "test-session");
+    expect(config.params.access_token).toBe("explicit");
+  });
+
+  test("requests without a token stay anonymous", () => {
+    expect(session.withPreviewAuth({ url: "/api/tasks", headers: {} }, "")).toEqual({ url: "/api/tasks", headers: {} });
+  });
+
+  test("state reports the token and whether iframe storage is blocked", () => {
+    expect(session.previewSessionState()).toEqual({ enabled: true, hasToken: false, storageBlocked: false });
+    jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    session.savePreviewSessionToken("test-session");
+    jest.restoreAllMocks();
+    expect(session.previewSessionState()).toEqual({ enabled: true, hasToken: true, storageBlocked: true });
+    session.clearPreviewSessionToken();
+    expect(session.previewSessionState().hasToken).toBe(false);
+  });
 });

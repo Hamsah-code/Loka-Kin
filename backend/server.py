@@ -471,12 +471,24 @@ def user_profile(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def preview_token_fallback_enabled() -> bool:
+    """Hanya aktif pada proses pratinjau yang secara eksplisit mengizinkan alur token."""
+    return os.environ.get("AUTH_PREVIEW_TOKEN_FALLBACK", "").lower() == "true"
+
+
 def request_session_token(request: Request) -> str:
     # An explicit per-tab session must override an older browser cookie.
     # Embedded previews can retain cookies while blocking login cookie updates.
     authorization = request.headers.get("authorization", "")
     if authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
+    # Gateway di depan preview dapat membuang header Authorization (gateway punya
+    # autentikasi sendiri) sekaligus memblokir cookie pihak ketiga. Saluran ketiganya
+    # yaitu parameter query, hanya diterima bila mode pratinjau eksplisit dinyalakan.
+    if preview_token_fallback_enabled():
+        query_token = str(request.query_params.get("access_token") or "").strip()
+        if query_token:
+            return query_token
     return request.cookies.get(SESSION_COOKIE_NAME, "")
 
 
@@ -1113,7 +1125,7 @@ async def login(payload: AuthLoginRequest, request: Request, response: Response)
     # The embedded Arena preview may block partitioned cookies in its iframe.
     # Expose the short-lived session token only in the explicitly enabled preview
     # process; the frontend keeps it in sessionStorage and sends it as Bearer.
-    if os.environ.get("AUTH_PREVIEW_TOKEN_FALLBACK", "").lower() == "true":
+    if preview_token_fallback_enabled():
         result["session_token"] = token
     return result
 

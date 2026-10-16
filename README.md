@@ -58,6 +58,14 @@ bersama di server. Token Bearer yang dikirim eksplisit mengungguli cookie lama;
 logout mencabut token tersebut. Bila penyimpanan iframe diblokir, sesi dapat
 berjalan di memori tab tetapi perlu login ulang setelah reload.
 
+Karena gateway di depan preview dapat membuang header `Authorization` sekaligus
+menolak cookie pihak ketiga, klien juga mengirim token yang sama sebagai
+`?access_token=` pada permintaan `/api`. Saluran ini hanya diterima API selama
+`AUTH_PREVIEW_TOKEN_FALLBACK=true`; token query yang tidak valid tidak jatuh
+balik ke cookie (gagal tertutup). Respons dengan token di URL selalu diberi
+`Cache-Control: no-store`, log akses uvicorn dimatikan pada `serve`, dan
+`.preview/requests.log` hanya mencatat keberadaan token, tidak pernah nilainya.
+
 **Jangan aktifkan kedua flag ini pada deployment produksi.** Build produksi
 biasa menggunakan cookie HttpOnly dan tidak menerima token dalam respons login.
 Setelah pembaruan preview, tutup tab lama dan buka ulang preview untuk memuat

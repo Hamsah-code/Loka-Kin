@@ -2,7 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { ArrowLeft, KeyRound, ShieldCheck, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
-import { previewTokenFallbackEnabled, savePreviewSessionToken } from "@/previewSession";
+import { clearPreviewSessionToken, PREVIEW_SESSION_HINT, previewTokenFallbackEnabled, savePreviewSessionToken } from "@/previewSession";
 import "./AuthModal.css";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
@@ -51,6 +51,22 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
         const response = await axios.post(`${API}/auth/login`, { nip: form.nip, pin: form.pin }, { withCredentials: true });
         if (previewTokenFallbackEnabled && response.data.session_token) {
           savePreviewSessionToken(response.data.session_token);
+        }
+        if (previewTokenFallbackEnabled) {
+          // Tab pratinjau bisa kehilangan cookie dan header Authorization sekaligus.
+          // Konfirmasi dulu bahwa sesi ini benar-benar dapat dibaca kembali, supaya
+          // pengguna tidak dilempar keluar tanpa pesan apa pun.
+          const verified = await axios.get(`${API}/auth/me`).catch(() => null);
+          if (!verified) {
+            clearPreviewSessionToken();
+            toast.error(`Login berhasil, tetapi sesi tidak dapat dibaca kembali dari tab ini. ${PREVIEW_SESSION_HINT}`, {
+              duration: 16000,
+              action: { label: "Buka di tab baru", onClick: () => window.open(window.location.href, "_blank", "noopener") },
+            });
+            return;
+          }
+          onAuthenticated(verified.data);
+          return;
         }
         onAuthenticated(response.data.user);
         return;
