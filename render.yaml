@@ -1,0 +1,31 @@
+# Blueprint Render untuk API LOKA-Kin. Render Dashboard → New → Blueprint → pilih repo.
+# Frontend dipublikasikan terpisah lewat GitHub Pages (.github/workflows/pages.yml).
+services:
+  - type: web
+    name: loka-kin-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    branch: main
+    healthCheckPath: /api/
+    autoDeploy: true
+    envVars:
+      # Pages (hamsah-code.github.io) dan API berada di origin berbeda, jadi cookie
+      # sesi harus SameSite=None; Secure dan CORS wajib memuat origin frontend secara
+      # eksplisit. Ubah CORS_ORIGINS bila memakai custom domain.
+      - key: AUTH_COOKIE_SAMESITE
+        value: none
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGINS
+        value: https://hamsah-code.github.io
+      # Rahasia penyiapan Admin/Super Admin pertama. Jangan pernah diisi di repo.
+      - key: AUTH_SETUP_SECRET
+        generateValue: true
+      - key: DB_NAME
+        value: loka_kin
+      # Kosongkan untuk memakai snapshot JSON sementara; isi URI MongoDB Atlas agar
+      # data laporan bertahan setelah instance di-restart atau di-deploy ulang.
+      - key: MONGO_URL
+        sync: false

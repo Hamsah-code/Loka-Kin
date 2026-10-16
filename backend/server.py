@@ -476,6 +476,28 @@ def preview_token_fallback_enabled() -> bool:
     return os.environ.get("AUTH_PREVIEW_TOKEN_FALLBACK", "").lower() == "true"
 
 
+def session_cookie_policy(request: Request) -> tuple[str, bool]:
+    """Atribut cookie sesi untuk deployment satu-origin maupun beda-origin.
+
+    Default tetap ``lax``. Bila frontend di-host di origin lain (mis. GitHub Pages)
+    sementara API berjalan di host terpisah, atur ``AUTH_COOKIE_SAMESITE=none``;
+    nilai ini otomatis memaksa ``Secure`` karena browser menolak cookie pihak
+    ketiga tanpa atribut tersebut. ``CORS_ORIGINS`` wajib memuat origin frontend
+    secara eksplisit (wildcard tidak diizinkan untuk request berkredensial).
+    """
+    samesite = os.environ.get("AUTH_COOKIE_SAMESITE", "lax").strip().lower()
+    if samesite not in {"lax", "strict", "none"}:
+        samesite = "lax"
+    configured_secure = os.environ.get("AUTH_COOKIE_SECURE")
+    if configured_secure is not None:
+        secure = configured_secure.lower() == "true"
+    else:
+        secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+    if samesite == "none":
+        secure = True
+    return samesite, secure
+
+
 def request_session_token(request: Request) -> str:
     # An explicit per-tab session must override an older browser cookie.
     # Embedded previews can retain cookies while blocking login cookie updates.
@@ -1107,16 +1129,14 @@ async def login(payload: AuthLoginRequest, request: Request, response: Response)
         {"id": staff["id"]},
         {"$set": {"login_failed_attempts": 0, "login_locked_until": "", "last_login_at": iso_utc(utc_now())}},
     )
-    configured_secure = os.environ.get("AUTH_COOKIE_SECURE")
-    forwarded_proto = request.headers.get("x-forwarded-proto", "")
-    secure_cookie = configured_secure.lower() == "true" if configured_secure is not None else (request.url.scheme == "https" or forwarded_proto == "https")
+    samesite, secure_cookie = session_cookie_policy(request)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         token,
         max_age=SESSION_TTL_HOURS * 60 * 60,
         httponly=True,
         secure=secure_cookie,
-        samesite="lax",
+        samesite=samesite,
         path="/",
     )
     response.headers["Cache-Control"] = "no-store, private"
@@ -1135,7 +1155,9 @@ async def logout(request: Request, response: Response):
     token = request_session_token(request)
     if token:
         await db.auth_sessions.delete_one({"token_hash": hash_session_token(token)})
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/", httponly=True, samesite="lax")
+    samesite, secure_cookie = session_cookie_policy(request)
+    # Penghapusan cookie lintas-origin butuh atribut yang sama dengan saat menyetelnya.
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", httponly=True, secure=secure_cookie, samesite=samesite)
     return {"ok": True}
 
 

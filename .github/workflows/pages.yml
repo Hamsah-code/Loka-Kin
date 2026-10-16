@@ -1,0 +1,85 @@
+name: Deploy frontend ke GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Bangun & uji dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Pasang dependensi
+        run: yarn install --frozen-lockfile --network-timeout 900000
+
+      - name: Pemeriksaan regresi frontend
+        run: CI=true yarn test --watchAll=false --runInBand
+
+      - name: Build produksi
+        env:
+          CI: "true"
+          GENERATE_SOURCEMAP: "false"
+          # Subpath situs Pages. Bila suatu saat memakai custom domain di root,
+          # ubah menjadi "/" (atau kosongkan).
+          PUBLIC_URL: /Loka-Kin/
+          # Origin API. Dibiarkan kosong berarti "/api" relatif (mis. pratinjau
+          # satu origin). Isi dengan URL Render, contoh:
+          #   https://loka-kin-api.onrender.com
+          # Nilai diambil dari repository variable REACT_APP_BACKEND_URL
+          # (Settings → Secrets and variables → Actions → Variables).
+          REACT_APP_BACKEND_URL: ${{ vars.REACT_APP_BACKEND_URL }}
+        run: yarn build
+
+      - name: Periksa konfigurasi API
+        env:
+          API_URL: ${{ vars.REACT_APP_BACKEND_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::notice::REACT_APP_BACKEND_URL kosong - frontend akan memanggil /api pada origin Pages. Isi repository variable itu dengan URL API agar login berfungsi."
+          else
+            echo "Frontend diarahkan ke $API_URL"
+          fi
+
+      - name: Fallback untuk tautan dalam
+        run: cp build/index.html build/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/build
+
+  deploy:
+    name: Terbitkan Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

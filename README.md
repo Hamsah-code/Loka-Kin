@@ -12,6 +12,15 @@ Untuk preview lokal, jalankan dari root repository:
 
 Dashboard memakai `/api` relatif dan proxy development React meneruskan permintaan ke FastAPI. Backend menyimpan data lokal ke `backend/data/loka_kin_db.json` jika `MONGO_URL` tidak dikonfigurasi.
 
+## Publikasi demo
+
+Landing page dan dashboard dapat diterbitkan sebagai situs publik (frontend di GitHub
+Pages, API di Render) dan konfigurasi siap pakainya sudah ada di repo: lihat
+[`DEPLOYMENT.md`](DEPLOYMENT.md) untuk `Dockerfile`, `render.yaml`, workflow
+`.github/workflows/pages.yml`, pasangan variabel yang wajib disetel
+(`CORS_ORIGINS`, `AUTH_COOKIE_SAMESITE`, `REACT_APP_BACKEND_URL`), serta pemeriksaan
+setelah publik.
+
 ## Aktivasi Admin pertama
 
 Admin pertama harus sudah tercantum di roster, dengan role `Admin`, NIP/NIK yang valid, dan departemen. Pemilik sistem menerbitkan kode aktivasi awal melalui alur penyiapan yang dilindungi `AUTH_SETUP_SECRET`:

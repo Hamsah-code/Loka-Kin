@@ -154,6 +154,34 @@ def test_preview_session_token_fallback_is_opt_in(api_client, monkeypatch):
 
 
 
+def test_cookie_samesite_policy_for_split_origin_deployments(api_client, monkeypatch):
+    """Frontend di GitHub Pages + API di host lain butuh SameSite=None; Secure.
+
+    Default harus tetap ``lax`` supaya deployment satu-origin tidak berubah sikap;
+    nilai di luar daftar tidak boleh menghasilkan cookie tanpa SameSite.
+    """
+    monkeypatch.delenv("AUTH_COOKIE_SAMESITE", raising=False)
+    login = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    assert login.status_code == 200
+    assert "samesite=lax" in login.headers.get("set-cookie", "").lower()
+    assert "secure" not in login.headers.get("set-cookie", "").lower()
+
+    monkeypatch.setenv("AUTH_COOKIE_SAMESITE", "none")
+    cross_site = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    cookie = cross_site.headers.get("set-cookie", "").lower()
+    assert "samesite=none" in cookie, cookie
+    assert "secure" in cookie  # browser menolak cookie pihak ketiga tanpa Secure
+    assert "httponly" in cookie
+
+    logout = api_client.post("/api/auth/logout", headers={"Cookie": f"{server.SESSION_COOKIE_NAME}=whatever"})
+    revoked = logout.headers.get("set-cookie", "").lower()
+    assert "samesite=none" in revoked and "secure" in revoked, revoked
+
+    monkeypatch.setenv("AUTH_COOKIE_SAMESITE", "tidak-valid")
+    fallback = api_client.post("/api/auth/login", json={"nip": STAFF_NIP, "pin": TEST_PIN})
+    assert "samesite=lax" in fallback.headers.get("set-cookie", "").lower()
+
+
 def test_preview_query_token_channel_replaces_stripped_authorization_header(api_client, monkeypatch):
     """Gateway pratinjau dapat membuang header Authorization sekaligus memblokir cookie.
 

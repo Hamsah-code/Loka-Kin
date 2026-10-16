@@ -1,0 +1,29 @@
+# Image hanya berisi API; apa pun yang tidak dibutuhkan server dikecualikan
+# supaya build cepat dan tanpa rahasia lokal.
+.git
+.github
+.emergent
+.venv
+venv
+node_modules
+frontend
+test_reports
+tests
+memory
+scripts
+preview.sh
+README.md
+design_guidelines.json.gz
+yarn.lock.gz
+test_result.md
+**/__pycache__
+**/*.pyc
+backend/data
+backend/tests
+backend/pytest.ini
+**/.env
+**/.env.*
+*.docx
+*.xlsx
+*.key
+.credentials
