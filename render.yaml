@@ -19,7 +19,7 @@ services:
       - key: AUTH_COOKIE_SECURE
         value: "true"
       - key: CORS_ORIGINS
-        value: https://hamsah-code.github.io
+        value: https://loka-kin.netlify.app,https://hamsah-code.github.io
       # Rahasia penyiapan Admin/Super Admin pertama. Jangan pernah diisi di repo.
       - key: AUTH_SETUP_SECRET
         generateValue: true
