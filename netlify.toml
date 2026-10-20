@@ -1,27 +1,34 @@
-# netlify.toml — Deploy frontend LOKA-Kin ke Netlify
+# netlify.toml — Deploy frontend LOKA-Kin ke Netlify (ANTI-GAGAL)
 # Frontend (React/Craco) di Netlify sebagai situs statis
-# Backend (FastAPI) tetap di Render / Fly / VPS (lihat DEPLOYMENT.md & DEPLOY_NETLIFY.md)
+# Backend (FastAPI) tetap di Render / Fly / VPS (lihat DEPLOY_NETLIFY.md)
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
   # Monorepo: hanya build subfolder frontend
   base = "frontend"
-  # Craco/React-Scripts output ke frontend/build
+  # Craco/React-Scripts output ke frontend/build (relative terhadap base)
   publish = "build"
-  # Build yang sama dengan GitHub Pages, tapi untuk Netlify root (PUBLIC_URL="/")
+  # Build harus lolos bahkan jika REACT_APP_BACKEND_URL belum diset
+  # --frozen-lockfile memastikan yarn.lock dipakai persis, --network-timeout untuk Netlify yang lambat
   command = "yarn install --frozen-lockfile --network-timeout 900000 && yarn build"
 
 [build.environment]
-  # Samakan dengan workflow GitHub Pages (Node 22)
+  # Versi yang sudah dites lokal dan di CI (GitHub Actions pakai 22)
   NODE_VERSION = "22"
   YARN_VERSION = "1.22.22"
+  NPM_VERSION = "10.9.2"
+  # Naikkan memori Node — CRA/Craco butuh >2GB di Netlify free
+  NODE_OPTIONS = "--max-old-space-size=4096"
   YARN_FLAGS = "--frozen-lockfile"
   CI = "true"
   GENERATE_SOURCEMAP = "false"
   # Penting: Netlify di-serve di root domain, bukan subpath /Loka-Kin/ seperti Pages
   PUBLIC_URL = "/"
-  # Jangan aktifkan fallback preview di produksi (hanya untuk iframe Arena)
-  # REACT_APP_PREVIEW_TOKEN_FALLBACK = ""  # biarkan kosong / tidak diset
+  # Pastikan preview flag MATI di production (hanya untuk iframe Arena)
+  REACT_APP_PREVIEW_TOKEN_FALLBACK = ""
+  # Kosongkan dulu jika backend belum siap — build tetap sukses, cuma runtime /api akan 404
+  # REACT_APP_BACKEND_URL akan diisi via Netlify UI → Environment variables
+  # Contoh: https://loka-kin-api.onrender.com (tanpa /api di akhir)
 
 # --- Headers keamanan & cache ---
 [[headers]]
@@ -39,38 +46,36 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Jangan cache HTML — agar deploy baru langsung terlihat
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[headers]]
   for = "/*"
   [headers.values]
-    # Dashboard tidak boleh di-cache agresif karena data dinamis
-    Cache-Control = "no-cache, no-store, must-revalidate"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    # Netlify tidak perlu CHIPS/Partitioned di frontend statis
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
-# --- SPA fallback ---
+# --- SPA fallback (HARUS paling akhir, setelah headers & proxy) ---
 # Semua route React Router (/, /dashboard, dll) harus ke index.html
-# Kecuali file statis nyata dan fungsi Netlify (jika ada)
+# Jika pakai proxy /api/*, letakkan proxy SEBELUM ini
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
 # --- (Opsional) Proxy API untuk hindari CORS ---
-# Jika kamu set REACT_APP_BACKEND_URL="" (kosong), frontend akan fetch /api/* relatif.
-# Netlify bisa proxy-kan ke Render agar tidak perlu CORS + cookie SameSite=None.
-# Aktifkan blok ini BILA kamu ingin mode proxy (lebih simpel, tanpa ubah backend CORS):
+# UNCOMMENT blok di bawah jika ingin tanpa CORS (frontend panggil /api relatif):
+# 1) Kosongkan REACT_APP_BACKEND_URL di Netlify UI
+# 2) Ganti URL to dengan URL Render kamu
+# 3) Di Render, AUTH_COOKIE_SAMESITE bisa "lax" (tidak perlu "none")
 #
 # [[redirects]]
 #   from = "/api/*"
 #   to = "https://loka-kin-api.onrender.com/api/:splat"
 #   status = 200
 #   force = true
-#   headers = {X-Forwarded-Host = "your-site.netlify.app"}
-#
-# Catatan proxy:
-# - Ganti URL di atas dengan URL Render kamu yang sebenarnya
-# - Jika pakai proxy, CORS_ORIGINS di backend TIDAK perlu ditambah Netlify
-# - Cookie sesi akan lewat proxy, jadi AUTH_COOKIE_SAMESITE bisa tetap "lax"
-# - Untuk production proxy, pastikan backend pakai --proxy-headers --forwarded-allow-ips '*'

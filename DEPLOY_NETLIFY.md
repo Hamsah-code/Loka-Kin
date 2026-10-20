@@ -10,6 +10,8 @@ Browser ──► https://loka-kin.netlify.app          (React build dari fronte
         └──► https://loka-kin-api.onrender.com/api (FastAPI, CORS + cookie Secure)
 ```
 
+> Jika deploy kamu **gagal terus**, langsung buka [`NETLIFY_FIX.md`](NETLIFY_FIX.md) — ada tabel error → solusi + setting UI yang benar.
+
 > Alternatif: jika ingin **tanpa CORS** sama sekali, lihat bagian **E. Mode Proxy** di bawah.
 
 ---
