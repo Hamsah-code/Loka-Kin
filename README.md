@@ -14,12 +14,12 @@ Dashboard memakai `/api` relatif dan proxy development React meneruskan perminta
 
 ## Publikasi demo
 
-Landing page dan dashboard dapat diterbitkan sebagai situs publik (frontend di GitHub
-Pages, API di Render) dan konfigurasi siap pakainya sudah ada di repo: lihat
-[`DEPLOYMENT.md`](DEPLOYMENT.md) untuk `Dockerfile`, `render.yaml`, workflow
-`.github/workflows/pages.yml`, pasangan variabel yang wajib disetel
-(`CORS_ORIGINS`, `AUTH_COOKIE_SAMESITE`, `REACT_APP_BACKEND_URL`), serta pemeriksaan
-setelah publik.
+Landing page dan dashboard dapat diterbitkan sebagai situs publik. Dua opsi frontend tersedia:
+
+- **GitHub Pages** (via `.github/workflows/pages.yml`) atau **Netlify** (via `netlify.toml` + `frontend/public/_redirects`) — keduanya menyajikan `frontend/build` sebagai situs statis;
+- **Backend API** di **Render** via `Dockerfile` + `render.yaml` (Docker, region Singapore).
+
+Lihat [`DEPLOYMENT.md`](DEPLOYMENT.md) untuk skenario GitHub Pages, atau [`DEPLOY_NETLIFY.md`](DEPLOY_NETLIFY.md) untuk **deploy ke Netlify** (rekomendasi: Netlify frontend + Render backend, termasuk cara set `CORS_ORIGINS`, `AUTH_COOKIE_SAMESITE`, `REACT_APP_BACKEND_URL`, mode proxy tanpa CORS, dan verifikasi pasca-publik).
 
 ## Aktivasi Admin pertama
 
