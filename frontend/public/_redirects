@@ -1,0 +1,2 @@
+# Netlify SPA fallback — semua route selain file statis diteruskan ke index.html
+/*    /index.html   200
