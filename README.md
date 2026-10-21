@@ -58,6 +58,41 @@ Sebelum menerbitkan PDF, impor roster berisi **NIP/NIK resmi** melalui menu **Da
 
 Di **Pengaturan website → Kredensial pegawai**, tombol **Rotasi & unduh PDF** menerbitkan PIN sementara acak untuk semua pegawai aktif (kecuali akun Super Admin), mencabut sesi lama, lalu mengunduh PDF satu kali yang memuat NIP/NIK, PIN sementara, dan status akun. Operasi ini **mereset seluruh PIN pegawai**; PIN lama tidak dapat ditampilkan karena hanya tersimpan sebagai hash. Pegawai wajib mengganti PIN sementara saat login pertama. PDF tidak disimpan ulang di server dan harus dibagikan secara pribadi.
 
+## Clustering akun & penyeragaman PIN
+
+`scripts/clustering.py` menyiapkan data akun untuk clustering peran (Staf, Ketua
+Tim, Clinical Supervisor, Kepala Loka, Super Admin) sekaligus menyeragamkan PIN
+pratinjau. Semua perintah membaca/menulis snapshot mode `local-json`
+(`backend/data/loka_kin_db.json`), jadi hentikan server lebih dulu.
+
+```bash
+# 1. Buat berkas isian peran (78 akun + blok Super Admin terpisah)
+python scripts/clustering.py template          # -> Clustering-Akun-LokaKin.xlsx
+
+# 2. Seragamkan PIN + aktifkan seluruh akun roster (peran tidak berubah)
+python scripts/clustering.py pin --pin 123456
+
+# 3. Terapkan peran hasil pengisian berkas Excel (+ PIN seragam)
+python scripts/clustering.py apply Clustering-Akun-LokaKin.xlsx
+
+# 4. Periksa matriks cluster peran x departemen
+python scripts/clustering.py report
+```
+
+Berkas Excel berisi empat sheet: **Isi Peran** (satu kolom per peran, diisi angka
+`1`; kolom peran sudah terisi otomatis dari database), **Snapshot Database**,
+**Matriks Cluster**, dan **Panduan** (kode peran, hak akses, daftar departemen
+resmi). Blok *Super Admin terpisah* di bawah tabel membuat akun `super-admin`
+yang tidak termasuk 78 akun roster; identitas awalnya ditandai placeholder agar
+tidak dipakai pada PDF kredensial.
+
+Ketentuan yang divalidasi sebelum menulis: tepat satu peran per baris,
+NIP/NIK 16 atau 18 digit dan tidak duplikat, serta departemen diawasi untuk peran
+pimpinan. Setiap `pin`/`apply` mencadangkan snapshot ke
+`loka_kin_db.backup-<waktu>.json` dan mencabut sesi login lama. Login memakai
+NIP/NIK, sehingga akun tanpa NIP/NIK tetap belum dapat dipakai clustering —
+lengkapi kolom D pada sheet *Isi Peran*.
+
 ## Sesi pada preview iframe
 
 `./preview.sh` mengaktifkan `AUTH_PREVIEW_TOKEN_FALLBACK=true` untuk API dan

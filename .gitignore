@@ -92,3 +92,6 @@ backend/data/*.json
 
 # Perkakas pratinjau lokal (kredensial/log runtime)
 .preview/
+
+# Template/ekspor clustering akun (dibuat scripts/clustering.py)
+Clustering-Akun-*.xlsx
