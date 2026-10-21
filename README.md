@@ -88,6 +88,15 @@ sehingga isinya selalu mengikuti data akun terbaru. PDF dan halaman cetak
 memakai tata letak A4 lanskap (akun + matriks cluster); halaman HTML dapat
 disimpan sebagai PDF dari dialog cetak peramban.
 
+Berkas yang sudah diisi dapat **diunggah kembali dari aplikasi**: tab *Clustering
+akun* → tombol **Terapkan berkas** (menerima `.xlsx`/`.xlsm`/`.csv`). Endpoint
+`POST /api/admin/clustering/apply` memvalidasi isi berkas lebih dulu; bila ada
+baris dengan dua peran, NIP/NIK tidak valid, atau NIP/NIK duplikat, tidak ada
+perubahan yang disimpan dan daftar masalah dikembalikan ke layar. Bila valid,
+peran + NIP/NIK + departemen diawasi + PIN seragam diterapkan, seluruh sesi
+login dicabut, dan ringkasan perubahan dicatat di `audit_logs`
+(`event: clustering_roles_applied`, tanpa nilai PIN).
+
 Berkas Excel berisi empat sheet: **Isi Peran** (satu kolom per peran, diisi angka
 `1`; kolom peran sudah terisi otomatis dari database), **Snapshot Database**,
 **Matriks Cluster**, dan **Panduan** (kode peran, hak akses, daftar departemen

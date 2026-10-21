@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { Download, FileSpreadsheet, Globe2, KeyRound, LoaderCircle, Palette, Printer, Save, ShieldAlert, ShieldCheck, Users } from "lucide-react";
+import { CheckCircle2, Download, FileSpreadsheet, Globe2, KeyRound, LoaderCircle, Palette, Printer, Save, ShieldAlert, ShieldCheck, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 import "./SystemAdminPage.css";
 
@@ -62,6 +62,9 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [clusterSummary, setClusterSummary] = useState(null);
   const [clusterBusy, setClusterBusy] = useState("");
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
+  const clusterFileRef = useRef(null);
 
   useEffect(() => setForm(settings || {}), [settings]);
 
@@ -132,6 +135,37 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
       toast.error(await errorMessage(error));
     } finally {
       setClusterBusy("");
+    }
+  };
+
+  const uploadClusteringFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("pin", "123456");
+    setApplyBusy(true);
+    setApplyResult(null);
+    try {
+      const response = await axios.post(`${API}/admin/clustering/apply`, form);
+      setApplyResult(response.data);
+      if (response.data.summary) setClusterSummary(response.data.summary);
+      toast.success(
+        `${response.data.processed} akun diperbarui` +
+        (response.data.role_changes?.length ? `, ${response.data.role_changes.length} perubahan peran` : "") +
+        ". Semua sesi login dicabut; silakan masuk ulang."
+      );
+    } catch (error) {
+      const data = error.response?.data;
+      if (data?.detail?.problems) {
+        setApplyResult({ ok: false, problems: data.detail.problems });
+        toast.error(data.detail.message || "Berkas isian belum konsisten.");
+      } else {
+        toast.error(await errorMessage(error));
+      }
+    } finally {
+      setApplyBusy(false);
+      if (clusterFileRef.current) clusterFileRef.current.value = "";
     }
   };
 
@@ -358,6 +392,52 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
                   : ""} tidak termasuk 78 akun roster.</p>
             </div>
           </div>
+
+          <div className="system-admin-download-row">
+            <div>
+              <b>Unggah berkas isian</b>
+              <span>Pilih berkas .xlsx/.csv yang sudah diisi. Peran, NIP/NIK, dan PIN seragam langsung diterapkan.</span>
+            </div>
+            <input
+              ref={clusterFileRef}
+              type="file"
+              accept=".xlsx,.xlsm,.csv"
+              data-testid="upload-clustering-file"
+              style={{ display: "none" }}
+              onChange={uploadClusteringFile}
+            />
+            <button type="button" className="primary-btn" disabled={applyBusy}
+              onClick={() => clusterFileRef.current?.click()}>
+              {applyBusy ? <LoaderCircle className="spinning" size={17} /> : <Upload size={17} />}
+              {applyBusy ? "Menerapkan…" : "Terapkan berkas"}
+            </button>
+          </div>
+
+          {applyResult?.ok && (
+            <div className="credential-missing-note" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }} role="status">
+              <b><CheckCircle2 size={14} /> Berhasil diterapkan: {applyResult.processed} akun, PIN {applyResult.pin}.</b>
+              <span>
+                {applyResult.role_changes?.length
+                  ? `Perubahan peran: ${applyResult.role_changes.map((item) => `${item.id} → ${item.to_label}`).join(", ")}.`
+                  : "Tidak ada perubahan peran (hanya PIN/NIP yang disegarkan)."}
+                {applyResult.super_admin?.created ? " Akun Super Admin terpisah dibuat." : ""}
+                {applyResult.super_admin?.updated ? " Akun Super Admin terpisah diperbarui." : ""}
+              </span>
+              {applyResult.missing_identity?.length > 0 && (
+                <small>{applyResult.missing_identity.length} akun belum punya NIP/NIK sehingga belum bisa login:
+                  {" "}{applyResult.missing_identity.slice(0, 6).map((person) => person.name).join(", ")}
+                  {applyResult.missing_identity.length > 6 ? ", …" : ""}</small>
+              )}
+            </div>
+          )}
+
+          {applyResult && !applyResult.ok && applyResult.problems?.length > 0 && (
+            <div className="credential-missing-note" role="alert">
+              <b>Peran belum diterapkan — perbaiki {applyResult.problems.length} hal berikut.</b>
+              <span>{applyResult.problems.slice(0, 8).join(" · ")}</span>
+              {applyResult.problems.length > 8 && <small>… dan {applyResult.problems.length - 8} masalah lain.</small>}
+            </div>
+          )}
 
           <div className="system-admin-download-row">
             <div>

@@ -1395,6 +1395,61 @@ async def clustering_summary(user: Dict[str, Any] = Depends(require_super_admin)
     return summarize(records)
 
 
+@api.post("/admin/clustering/apply")
+async def clustering_apply(
+    file: UploadFile = File(...),
+    pin: str = Form("123456"),
+    strict: bool = Form(False),
+    user: Dict[str, Any] = Depends(require_super_admin),
+):
+    """Terapkan peran + PIN seragam dari berkas Excel/CSV yang diunggah Super Admin."""
+    from clustering_apply import (
+        TemplateError,
+        apply_roles,
+        read_upload,
+        result_payload,
+        upsert_separate_super_admin,
+    )
+    from clustering_export import summarize
+
+    payload = await file.read()
+    try:
+        entries, separate = read_upload(file.filename or "unggahan.xlsx", payload)
+    except TemplateError as exc:
+        raise HTTPException(400, str(exc))
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    try:
+        result = apply_roles(records, entries, pin, strict=strict)
+    except TemplateError as exc:
+        raise HTTPException(400, str(exc))
+    if result["problems"]:
+        raise HTTPException(400, {
+            "message": "Peran tidak diterapkan karena berkas isian belum konsisten.",
+            "problems": result["problems"],
+        })
+
+    super_admin = upsert_separate_super_admin(records, separate, pin=pin)
+    by_id = {str(row.get("id")): row for row in records}
+    for row in records:
+        await db.staff.update_one({"id": row["id"]}, {"$set": row})
+    await db.auth_sessions.delete_many({})
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "event": "clustering_roles_applied",
+        "actor_id": user["id"],
+        "file": file.filename,
+        "processed": result["processed"],
+        "role_changes": len(result["role_changes"]),
+        "pin_uniform": True,
+        "created_at": iso_utc(utc_now()),
+    })
+    response = result_payload(result, super_admin)
+    response["summary"] = summarize(list(by_id.values()))
+    response["sessions_revoked"] = True
+    return response
+
+
 @api.get("/admin/clustering/template.xlsx")
 async def clustering_template_xlsx(user: Dict[str, Any] = Depends(require_super_admin)):
     """Format clustering Excel (4 sheet) yang dibuat dari data akun terkini."""

@@ -8,7 +8,7 @@ Perintah
              Staf) sekaligus blok akun Super Admin terpisah.
   pin        Seragamkan PIN semua akun roster (default 123456) dan aktifkan
              sehingga setiap akun dapat dipakai untuk clustering.
-  apply      Terapkan peran dari berkas Excel ke database (PIN tetap diseragamkan).
+  apply      Terapkan peran dari berkas Excel/CSV ke database (PIN diseragamkan).
   report     Tampilkan matriks cluster (peran x departemen) dari database.
 
 Contoh
@@ -23,8 +23,8 @@ Skrip ini menulis langsung ke snapshot JSON mode ``local-json``
 Hentikan server pratinjau sebelum menjalankan ``pin``/``apply`` agar isi memori
 server tidak menimpa perubahan: hentikan proses, jalankan perintah, nyalakan lagi.
 
-Format Excel/CSV/cetak yang sama juga dapat diunduh dari aplikasi melalui
-menu Super Admin → Clustering akun (endpoint ``/api/admin/clustering/*``).
+Alternatif tanpa terminal: unggah berkas yang sudah diisi lewat aplikasi
+(Super Admin → Pengaturan website → Clustering akun → Terapkan berkas).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 REPO = Path(__file__).resolve().parents[1]
 BACKEND = REPO / "backend"
@@ -48,16 +48,17 @@ sys.path.insert(0, str(BACKEND))
 from clustering_export import (  # noqa: E402  (butuh sys.path di atas)
     DEFAULT_PIN,
     ROLES,
-    ROLE_ACCESS,
-    ROLE_CODE_BY_LABEL,
     ROLE_LABEL_BY_CODE,
-    SEPARATE_SUPER_ADMIN_DEFAULT,
-    SEPARATE_SUPER_ADMIN_ID,
-    SUPERVISOR_ROLES,
     build_workbook,
     normalize_digits,
     roster_rows,
-    separate_super_admin,
+)
+from clustering_apply import (  # noqa: E402
+    TemplateError,
+    apply_roles as _apply_roles,
+    parse_workbook,
+    uniform_pin_fields,
+    upsert_separate_super_admin as _upsert_separate_super_admin,
 )
 
 
@@ -102,32 +103,6 @@ def roster_staff(store: Snapshot) -> List[Dict[str, Any]]:
     return roster_rows(store.staff)
 
 
-def account_label(row: Dict[str, Any]) -> str:
-    return ROLE_LABEL_BY_CODE.get(str(row.get("role") or "staff"), "Staf")
-
-
-def id_type_for(nip: str) -> str:
-    return {16: "NIK", 18: "NIP"}.get(len(nip), "")
-
-
-def uniform_pin_fields(pin: str, source: str = "uniform-clustering") -> Dict[str, Any]:
-    from auth_utils import hash_credential
-
-    return {
-        "pin_hash": hash_credential(pin),
-        "is_activated": True,
-        "pin_change_required": False,
-        "activation_code_hash": "",
-        "activation_code_expires_at": "",
-        "activation_code_attempts": 0,
-        "activation_code_locked_until": "",
-        "login_failed_attempts": 0,
-        "login_locked_until": "",
-        "pin_source": source,
-        "pin_updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-
-
 # --------------------------------------------------------------------------- #
 # template
 # --------------------------------------------------------------------------- #
@@ -153,219 +128,34 @@ def apply_pin(store: Snapshot, pin: str, only_ids: Optional[Sequence[str]] = Non
         targets = [row for row in targets if row.get("id") in wanted]
 
     fields = uniform_pin_fields(pin)
-    changed = 0
     for row in targets:
         row.update(fields)
         if row.get("identity_is_placeholder") and not row.get("credential_source"):
             row["credential_source"] = "uniform-clustering"
-        changed += 1
 
     if revoke_sessions:
         store.data["auth_sessions"] = []
 
-    return {"pin": pin, "accounts": changed, "sessions_revoked": bool(revoke_sessions)}
+    return {"pin": pin, "accounts": len(targets), "sessions_revoked": bool(revoke_sessions)}
 
 
 # --------------------------------------------------------------------------- #
-# apply (peran dari Excel)
+# apply (peran dari Excel/CSV)
 # --------------------------------------------------------------------------- #
-TRUE_MARKS = {"1", "01", "x", "X", "✓", "v", "V", "ya", "YA", "yes", "TRUE", "True", "true"}
+def read_template(path: Path):
+    """Baca berkas isian (xlsx/csv) — lihat ``clustering_apply.parse_workbook``."""
+    from clustering_apply import read_upload
+
+    payload = Path(path).read_bytes()
+    return read_upload(Path(path).name, payload)
 
 
-def _is_marked(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return int(value) == 1
-    return str(value).strip() in TRUE_MARKS
-
-
-def read_template(path: Path) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    from openpyxl import load_workbook
-
-    wb = load_workbook(path, data_only=True)
-    if "Isi Peran" not in wb.sheetnames:
-        raise SystemExit("Sheet 'Isi Peran' tidak ditemukan pada berkas ini.")
-
-    ws = wb["Isi Peran"]
-    header_row = None
-    for row in range(1, 15):
-        if str(ws.cell(row=row, column=2).value or "").strip() == "ID Akun":
-            header_row = row
-            break
-    if header_row is None:
-        raise SystemExit("Baris header ('ID Akun') tidak ditemukan pada sheet 'Isi Peran'.")
-
-    role_cols: Dict[str, int] = {}
-    for col in range(1, ws.max_column + 1):
-        label = str(ws.cell(row=header_row, column=col).value or "").strip()
-        if label in ROLE_CODE_BY_LABEL:
-            role_cols[ROLE_CODE_BY_LABEL[label]] = col
-    missing = [label for code, label in ROLES if code not in role_cols]
-    if missing:
-        raise SystemExit(f"Kolom peran tidak lengkap: {', '.join(missing)}")
-
-    entries: List[Dict[str, Any]] = []
-    blank_streak = 0
-    for row in range(header_row + 1, ws.max_row + 1):
-        marker = str(ws.cell(row=row, column=1).value or "")
-        if marker.startswith("AKUN SUPER ADMIN TERPISAH"):
-            break
-        ident = str(ws.cell(row=row, column=2).value or "").strip()
-        if not ident:
-            blank_streak += 1
-            if blank_streak >= 5:
-                break
-            continue
-        blank_streak = 0
-        marks = [code for code, col in role_cols.items() if _is_marked(ws.cell(row=row, column=col).value)]
-        entries.append({
-            "row": row,
-            "id": ident,
-            "nama": str(ws.cell(row=row, column=3).value or "").strip(),
-            "nip": normalize_digits(ws.cell(row=row, column=4).value),
-            "department": str(ws.cell(row=row, column=5).value or "").strip(),
-            "marks": marks,
-            "supervised": str(ws.cell(row=row, column=role_cols["staff"] + 1).value or "").strip(),
-        })
-
-    separate: Optional[Dict[str, Any]] = None
-    for row in range(1, ws.max_row + 1):
-        marker = str(ws.cell(row=row, column=1).value or "")
-        if marker.startswith("AKUN SUPER ADMIN TERPISAH"):
-            values = [ws.cell(row=row + 2, column=col).value for col in range(1, 5)]
-            separate = {
-                "name": str(values[0] or "").strip(),
-                "nip": normalize_digits(values[1]),
-                "pin": normalize_digits(values[2]) or DEFAULT_PIN,
-                "note": str(values[3] or "").strip(),
-                "row": row + 2,
-            }
-            break
-    return entries, separate
-
-
-def apply_roles(store: Snapshot, entries: Iterable[Dict[str, Any]], pin: str,
-                strict: bool = False) -> Dict[str, Any]:
-    staff_by_id = {str(row.get("id")): row for row in store.staff}
-    seen_nip: Dict[str, str] = {}
-    for row in store.staff:
-        nip = normalize_digits(row.get("nip"))
-        if nip:
-            seen_nip[nip] = str(row.get("id"))
-
-    problems: List[str] = []
-    warnings: List[str] = []
-    missing_identity: List[Tuple[str, str]] = []
-    changed: List[Tuple[str, str, str]] = []
-    fields = uniform_pin_fields(pin)
-
-    for entry in entries:
-        ident = entry["id"]
-        row = staff_by_id.get(ident)
-        if row is None:
-            problems.append(f"Baris {entry['row']}: ID '{ident}' tidak ada di database.")
-            continue
-        if row.get("system_super_admin"):
-            warnings.append(f"Baris {entry['row']}: '{ident}' adalah akun Super Admin terpisah; dilewati.")
-            continue
-        if len(entry["marks"]) > 1:
-            labels = ", ".join(ROLE_LABEL_BY_CODE[code] for code in entry["marks"])
-            problems.append(
-                f"Baris {entry['row']} ({ident}): lebih dari satu peran ditandai ({labels}). "
-                f"Hapus angka 1 pada kolom peran lain (pilih sel lalu tekan Delete), sisakan satu."
-            )
-            continue
-        if not entry["marks"]:
-            if strict:
-                problems.append(f"Baris {entry['row']} ({ident}): belum ada peran yang ditandai.")
-                continue
-            warnings.append(f"Baris {entry['row']} ({ident}): peran kosong, peran lama dipertahankan.")
-            role_code = str(row.get("role") or "staff")
-        else:
-            role_code = entry["marks"][0]
-
-        nip = entry["nip"]
-        if nip:
-            if len(nip) not in (16, 18):
-                problems.append(f"Baris {entry['row']} ({ident}): NIP/NIK '{nip}' bukan 16/18 digit.")
-                continue
-            owner = seen_nip.get(nip)
-            if owner and owner != ident:
-                problems.append(f"Baris {entry['row']} ({ident}): NIP/NIK '{nip}' sudah dipakai {owner}.")
-                continue
-        else:
-            nip = normalize_digits(row.get("nip"))
-            if not nip:
-                missing_identity.append((ident, str(row.get("name") or "")))
-
-        supervised = [
-            item.strip() for item in entry["supervised"].replace(",", ";").split(";") if item.strip()
-        ]
-        if role_code not in SUPERVISOR_ROLES:
-            supervised = []
-        elif not supervised:
-            supervised = [row.get("department")] if row.get("department") else []
-
-        before = str(row.get("role") or "staff")
-        row["role"] = role_code
-        if nip:
-            row["nip"] = nip
-            row["id_type"] = id_type_for(nip)
-            seen_nip[nip] = ident
-        row["supervised_departments"] = supervised
-        row.update(fields)
-        if before != role_code:
-            changed.append((ident, before, role_code))
-
-    return {
-        "pin": pin,
-        "problems": problems,
-        "warnings": warnings,
-        "missing_identity": missing_identity,
-        "role_changes": changed,
-        "processed": len(list(entries)),
-    }
+def apply_roles(store: Snapshot, entries, pin: str, strict: bool = False) -> Dict[str, Any]:
+    return _apply_roles(store.staff, entries, pin, strict=strict)
 
 
 def upsert_separate_super_admin(store: Snapshot, info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not info or not info.get("nip"):
-        return {"created": False, "reason": "NIP/NIK Super Admin terpisah kosong — dilewati."}
-    nip = normalize_digits(info["nip"])
-    if len(nip) not in (16, 18):
-        return {"created": False, "reason": f"NIP/NIK Super Admin '{nip}' bukan 16/18 digit — dilewati."}
-    for row in store.staff:
-        if str(row.get("id")) != SEPARATE_SUPER_ADMIN_ID and normalize_digits(row.get("nip")) == nip:
-            return {"created": False, "reason": f"NIP/NIK {nip} sudah dipakai akun {row.get('id')}."}
-
-    name = info.get("name") or SEPARATE_SUPER_ADMIN_DEFAULT["name"]
-    pin = info.get("pin") or DEFAULT_PIN
-    existing = separate_super_admin(store.staff)
-    payload = {
-        "id": SEPARATE_SUPER_ADMIN_ID,
-        "name": name,
-        "initials": "".join(part[0] for part in name.split()[:2]).upper() or "SA",
-        "department": "Admin",
-        "position": "Super Admin",
-        "keterangan": "Akun sistem terpisah (di luar roster staf)",
-        "active": True,
-        "archived": False,
-        "nip": nip,
-        "id_type": id_type_for(nip),
-        "role": "super_admin",
-        "system_super_admin": True,
-        "supervised_departments": [],
-        "identity_is_placeholder": True,
-        "credential_source": "clustering-setup",
-    }
-    payload.update(uniform_pin_fields(pin, source="clustering-setup"))
-    if existing is None:
-        store.staff.append(payload)
-        return {"created": True, "id": SEPARATE_SUPER_ADMIN_ID, "pin": pin, "nip": nip}
-    existing.update(payload)
-    return {"created": False, "updated": True, "id": SEPARATE_SUPER_ADMIN_ID, "pin": pin, "nip": nip}
+    return _upsert_separate_super_admin(store.staff, info)
 
 
 # --------------------------------------------------------------------------- #
@@ -426,8 +216,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     pin_cmd.add_argument("--keep-sessions", action="store_true", help="jangan cabut sesi login yang ada")
     pin_cmd.add_argument("--dry-run", action="store_true", help="tampilkan rencana tanpa menulis")
 
-    app = sub.add_parser("apply", help="terapkan peran dari berkas Excel")
-    app.add_argument("path", nargs="?", type=Path, default=DEFAULT_TEMPLATE, help="berkas Excel terisi")
+    app = sub.add_parser("apply", help="terapkan peran dari berkas Excel/CSV")
+    app.add_argument("path", nargs="?", type=Path, default=DEFAULT_TEMPLATE, help="berkas isian (xlsx/csv)")
     app.add_argument("--pin", default=DEFAULT_PIN, help=f"PIN seragam (default {DEFAULT_PIN})")
     app.add_argument("--strict", action="store_true", help="gagalkan bila ada baris tanpa peran")
     app.add_argument("--keep-sessions", action="store_true", help="jangan cabut sesi login yang ada")
@@ -463,7 +253,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     path = Path(args.path)
     if not path.is_file():
         raise SystemExit(f"Berkas tidak ditemukan: {path}")
-    entries, separate = read_template(path)
+    try:
+        entries, separate = read_template(path)
+    except TemplateError as exc:
+        raise SystemExit(f"Berkas tidak sesuai format: {exc}")
+
     result = apply_roles(store, entries, args.pin, strict=args.strict)
     if result["problems"]:
         print("Peran TIDAK diterapkan karena ada masalah pada berkas:")
