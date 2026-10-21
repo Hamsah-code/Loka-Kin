@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Download, Globe2, KeyRound, LoaderCircle, Palette, Save, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Download, FileSpreadsheet, Globe2, KeyRound, LoaderCircle, Palette, Printer, Save, ShieldAlert, ShieldCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import "./SystemAdminPage.css";
 
@@ -60,6 +60,8 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
   const [status, setStatus] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
+  const [clusterSummary, setClusterSummary] = useState(null);
+  const [clusterBusy, setClusterBusy] = useState("");
 
   useEffect(() => setForm(settings || {}), [settings]);
 
@@ -79,11 +81,83 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
     }
   };
 
+  const refreshClustering = async () => {
+    try {
+      const response = await axios.get(`${API}/admin/clustering/summary`);
+      setClusterSummary(response.data);
+    } catch (error) {
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        toast.error(error.response?.data?.detail || "Akses Super Admin diperlukan.");
+      } else {
+        toast.error("Ringkasan cluster belum dapat dimuat.");
+      }
+    }
+  };
+
   useEffect(() => {
     if (tab === "credentials" && !status) refreshCredentialStatus();
+    if (tab === "clustering" && !clusterSummary) refreshClustering();
     // Load the protected status only when its tab is opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const saveBlob = (data, type, filename) => {
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadClustering = async (kind) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setClusterBusy(kind);
+    try {
+      const response = await axios.get(`${API}/admin/clustering/template.${kind}`, { responseType: "blob" });
+      if (kind === "xlsx") {
+        saveBlob(response.data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          `Clustering-Akun-LokaKin-${today}.xlsx`);
+        toast.success("Template Excel terunduh. Isi kolom peran lalu jalankan apply.");
+      } else {
+        saveBlob(response.data, "text/csv;charset=utf-8", `Clustering-Akun-LokaKin-${today}.csv`);
+        toast.success("CSV terunduh (satu kolom per peran).");
+      }
+    } catch (error) {
+      toast.error(await errorMessage(error));
+    } finally {
+      setClusterBusy("");
+    }
+  };
+
+  const printClustering = async () => {
+    setClusterBusy("print");
+    try {
+      const response = await axios.get(`${API}/admin/clustering/template.html`, { responseType: "text" });
+      const blob = new Blob([response.data], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (!win) {
+        // Popup diblokir (umum pada iframe pratinjau): unduh berkas HTML-nya.
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `Clustering-Akun-LokaKin-${new Date().toISOString().slice(0, 10)}.html`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        toast.info("Popup diblokir. Berkas HTML siap cetak diunduh — buka lalu tekan Ctrl+P.");
+      } else {
+        toast.success("Tab cetak dibuka. Gunakan Ctrl+P / Cetak untuk menyimpan PDF.");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      toast.error(await errorMessage(error));
+    } finally {
+      setClusterBusy("");
+    }
+  };
 
   const updateField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
@@ -144,6 +218,9 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
         <button type="button" role="tab" aria-selected={tab === "credentials"} className={tab === "credentials" ? "active" : ""} onClick={() => setTab("credentials")}>
           <KeyRound size={16} /> Kredensial pegawai
         </button>
+        <button type="button" role="tab" aria-selected={tab === "clustering"} className={tab === "clustering" ? "active" : ""} onClick={() => setTab("clustering")}>
+          <Users size={16} /> Clustering akun
+        </button>
       </div>
 
       {tab === "website" ? (
@@ -195,7 +272,7 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
             </button>
           </div>
         </form>
-      ) : (
+      ) : tab === "credentials" ? (
         <div className="system-admin-credentials">
           <div className="system-admin-panel-head">
             <span className="system-admin-panel-icon credential"><KeyRound size={18} /></span>
@@ -238,6 +315,95 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
             </button>
           </div>
           <p className="credential-distribution-warning">RAHASIA: simpan PDF di tempat aman, jangan unggah ke repositori/grup umum, dan bagikan hanya kepada pegawai yang bersangkutan.</p>
+        </div>
+      ) : (
+        <div className="system-admin-credentials" data-testid="clustering-panel">
+          <div className="system-admin-panel-head">
+            <span className="system-admin-panel-icon"><Users size={18} /></span>
+            <div>
+              <h2>Format clustering akun</h2>
+              <p>Unduh format peran dari data akun terkini: satu kolom untuk tiap peran, siap diisi lalu diterapkan.</p>
+            </div>
+            <button type="button" className="secondary-btn system-admin-refresh" onClick={refreshClustering}>
+              Muat ulang
+            </button>
+          </div>
+
+          <div className="credential-stat-grid">
+            <div><span>Akun roster</span><b>{clusterSummary?.roster_total ?? "—"}</b></div>
+            <div><span>Staf</span><b>{clusterSummary?.role_counts?.staff ?? "—"}</b></div>
+            <div>
+              <span>Ketua Tim / CS / Kepala</span>
+              <b>
+                {clusterSummary
+                  ? (clusterSummary.role_counts?.team_lead || 0)
+                    + (clusterSummary.role_counts?.clinical_supervisor || 0)
+                    + (clusterSummary.role_counts?.head || 0)
+                  : "—"}
+              </b>
+            </div>
+            <div><span>Belum punya NIP/NIK</span><b>{clusterSummary?.missing_identity ?? "—"}</b></div>
+          </div>
+
+          <div className="credential-security-note">
+            <ShieldAlert size={18} />
+            <div>
+              <b>Format ini memuat nama dan NIP/NIK pegawai.</b>
+              <p>Simpan dan cetak hanya untuk keperluan clustering internal. Akun Super Admin terpisah
+                {clusterSummary?.separate_super_admin
+                  ? ` (${clusterSummary.separate_super_admin.name}, NIP/NIK ${clusterSummary.separate_super_admin.nip})`
+                  : ""} tidak termasuk 78 akun roster.</p>
+            </div>
+          </div>
+
+          <div className="system-admin-download-row">
+            <div>
+              <b>Template Excel (.xlsx)</b>
+              <span>4 sheet: Isi Peran (satu kolom per peran), Snapshot Database, Matriks Cluster, dan Panduan.</span>
+            </div>
+            <button type="button" className="primary-btn" data-testid="download-clustering-xlsx"
+              disabled={clusterBusy === "xlsx"} onClick={() => downloadClustering("xlsx")}>
+              {clusterBusy === "xlsx" ? <LoaderCircle className="spinning" size={17} /> : <FileSpreadsheet size={17} />}
+              {clusterBusy === "xlsx" ? "Menyiapkan…" : "Unduh Excel"}
+            </button>
+          </div>
+
+          <div className="system-admin-download-row">
+            <div>
+              <b>Tabel CSV</b>
+              <span>78 baris akun dengan kolom 0/1 per peran — mudah dibaca pandas, SPSS, atau Excel.</span>
+            </div>
+            <button type="button" className="secondary-btn" data-testid="download-clustering-csv"
+              disabled={clusterBusy === "csv"} onClick={() => downloadClustering("csv")}>
+              {clusterBusy === "csv" ? <LoaderCircle className="spinning" size={17} /> : <Download size={17} />}
+              {clusterBusy === "csv" ? "Menyiapkan…" : "Unduh CSV"}
+            </button>
+          </div>
+
+          <div className="system-admin-download-row">
+            <div>
+              <b>Tampilan cetak / PDF</b>
+              <span>Halaman A4 lanskap berisi seluruh akun dan matriks cluster; simpan sebagai PDF lewat dialog cetak.</span>
+            </div>
+            <button type="button" className="secondary-btn" data-testid="print-clustering"
+              disabled={clusterBusy === "print"} onClick={printClustering}>
+              {clusterBusy === "print" ? <LoaderCircle className="spinning" size={17} /> : <Printer size={17} />}
+              {clusterBusy === "print" ? "Menyiapkan…" : "Cetak / PDF"}
+            </button>
+          </div>
+
+          {clusterSummary?.missing_staff?.length > 0 && (
+            <div className="credential-missing-note" role="status">
+              <b>{clusterSummary.missing_identity} akun belum punya NIP/NIK valid.</b>
+              <span>Login memakai NIP/NIK 16–18 digit, jadi akun tersebut belum bisa dipakai clustering.
+                Lengkapi kolom NIP/NIK pada sheet Isi Peran lalu jalankan <code>clustering.py apply</code>.</span>
+              <small>Contoh: {clusterSummary.missing_staff.slice(0, 6).map((person) => person.name).join(", ")}
+                {clusterSummary.missing_staff.length > 6 ? ", …" : ""}</small>
+            </div>
+          )}
+
+          <p className="credential-distribution-warning">PIN seragam 123456 hanya untuk clustering/pelatihan.
+            Setelah selesai, rotasi PIN lewat menu Kredensial pegawai atau minta pengguna mengganti PIN.</p>
         </div>
       )}
     </section>

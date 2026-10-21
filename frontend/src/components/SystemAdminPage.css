@@ -61,3 +61,5 @@
 .dark-mode .credential-missing-note{background:#341d23;border-color:#7f303b;color:#fecaca}
 .dark-mode .system-admin-secure{background:#122d24;border-color:#246645;color:#86efac}
 @media(max-width:720px){.system-admin-heading{flex-direction:column}.system-admin-grid{grid-template-columns:1fr}.system-admin-field.wide{grid-column:auto}.credential-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.system-admin-form,.system-admin-credentials{padding:15px}.system-admin-form-footer,.system-admin-download-row{align-items:stretch;flex-direction:column}.system-admin-form-footer .primary-btn,.credential-download-button{width:100%}.system-admin-tabs button{flex:1;justify-content:center;padding:8px 7px;font-size:10px}}
+.system-admin-credentials .system-admin-download-row .secondary-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.credential-missing-note code{font:600 10px "Consolas",monospace;background:#f1f5f9;border-radius:4px;padding:1px 4px}

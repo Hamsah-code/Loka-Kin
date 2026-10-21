@@ -1386,6 +1386,68 @@ async def rotate_credentials_and_download_pdf(user: Dict[str, Any] = Depends(req
     )
 
 
+@api.get("/admin/clustering/summary")
+async def clustering_summary(user: Dict[str, Any] = Depends(require_super_admin)):
+    """Ringkasan cluster peran x departemen untuk ditampilkan di aplikasi."""
+    from clustering_export import summarize
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    return summarize(records)
+
+
+@api.get("/admin/clustering/template.xlsx")
+async def clustering_template_xlsx(user: Dict[str, Any] = Depends(require_super_admin)):
+    """Format clustering Excel (4 sheet) yang dibuat dari data akun terkini."""
+    from clustering_export import DEFAULT_PIN, build_workbook
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    workbook = build_workbook(records, pin=DEFAULT_PIN)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    stamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d")
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="Clustering-Akun-LokaKin-{stamp}.xlsx"',
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@api.get("/admin/clustering/template.csv")
+async def clustering_template_csv(user: Dict[str, Any] = Depends(require_super_admin)):
+    """Tabel datar 78 akun (satu kolom per peran) untuk pandas/SPSS/Excel."""
+    from clustering_export import DEFAULT_PIN, build_csv
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    stamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d")
+    return StreamingResponse(
+        io.BytesIO(build_csv(records, pin=DEFAULT_PIN)),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="Clustering-Akun-LokaKin-{stamp}.csv"',
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@api.get("/admin/clustering/template.html")
+async def clustering_template_html(user: Dict[str, Any] = Depends(require_super_admin)):
+    """Tampilan siap cetak (A4 lanskap) sebagai alternatif PDF/Excel."""
+    from clustering_export import DEFAULT_PIN, build_print_html
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    return Response(
+        content=build_print_html(records, pin=DEFAULT_PIN),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"},
+    )
+
+
 @api.get("/staff", response_model=List[Staff])
 async def get_staff(include_inactive: bool = True, user: Dict[str, Any] = Depends(get_current_user)):
     """Staf only see themselves; supervisors can see all names; only Admin sees NIP/NIK."""
