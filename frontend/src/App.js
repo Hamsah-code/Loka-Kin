@@ -63,6 +63,69 @@ const staffIdLabel = (person) => person?.id_type || inferIdType(person?.nip) || 
 const staffIdValue = (person) => person?.nip ? person.nip : "—";
 const staffKeterangan = (person) => person?.keterangan || person?.position || "—";
 
+// Kelompok bagian untuk menentukan Ketua Tim penanda tangan pada ekspor laporan.
+const SIGNATURE_GROUPS = [
+  { id: "medis", label: "Medis", departments: ["Layanan Rehabilitasi Medis"] },
+  { id: "sosial", label: "Sosial", departments: ["Layanan Rehabilitasi Sosial"] },
+  {
+    id: "umum",
+    label: "Umum",
+    departments: ["Umum", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
+  },
+];
+const DEFAULT_HEAD_NAME = "Heru Herlambang, S.AP";
+
+const signatureGroupOf = (person) => {
+  const department = person?.department || "";
+  return SIGNATURE_GROUPS.find((group) => group.departments.includes(department)) || SIGNATURE_GROUPS[2];
+};
+
+const teamLeadFor = (staffList, person) => {
+  const group = signatureGroupOf(person);
+  const leads = (staffList || []).filter((s) => s.role === "team_lead");
+  const bySupervision = leads.find((lead) =>
+    (lead.supervised_departments || []).some((dept) => group.departments.includes(dept)));
+  if (bySupervision) return bySupervision;
+  return leads.find((lead) => group.departments.includes(lead.department)) || null;
+};
+
+const headStaffOf = (staffList) => (staffList || []).find((s) => s.role === "head") || null;
+
+/**
+ * Penanda tangan kolom "Mengetahui" pada ekspor Excel/PDF.
+ * Staf ditandatangani Ketua Tim bagiannya (Medis/Sosial/Umum); peran lain oleh Kepala Loka.
+ */
+const knowingSignature = (staffList, person) => {
+  if (person?.role === "staff") {
+    const group = signatureGroupOf(person);
+    const lead = teamLeadFor(staffList, person);
+    return {
+      title: `Ketua Tim ${group.label}`,
+      name: lead?.name || `Ketua Tim ${group.label}`,
+      groupLabel: group.label,
+      isTeamLead: true,
+    };
+  }
+  return {
+    title: "Kepala Loka Rehabilitasi Narkotika Kalianda",
+    name: headStaffOf(staffList)?.name || DEFAULT_HEAD_NAME,
+    isTeamLead: false,
+  };
+};
+
+/** Ekspor gabungan: pakai Ketua Tim hanya bila seluruh staf berasal dari satu bagian. */
+const groupedSignature = (staffList, people) => {
+  const list = people || [];
+  const groups = [...new Set(list.map((person) => signatureGroupOf(person).id))];
+  const allStaff = list.length > 0 && list.every((person) => person.role === "staff");
+  if (allStaff && groups.length === 1) return knowingSignature(staffList, list[0]);
+  return {
+    title: "Kepala Loka Rehabilitasi Narkotika Kalianda",
+    name: headStaffOf(staffList)?.name || DEFAULT_HEAD_NAME,
+    isTeamLead: false,
+  };
+};
+
 const toDateTimeInput = (d = new Date()) => {
   if (!d) return "";
   if (typeof d === "string") {
@@ -2269,12 +2332,13 @@ export default function App() {
         </table>
       `;
 
+      const signer = knowingSignature(staff, targetStaff);
       sigHtml = `
         <table class="signature-table">
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
-          <tr><td><b>Kepala Loka Rehabilitasi Narkotika Kalianda</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
+          <tr><td><b>${signer.title}</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>Heru Herlambang, S. AP</b></td><td><b>${targetStaff.name}</b></td></tr>
+          <tr><td><b>${signer.name}</b></td><td><b>${targetStaff.name}</b></td></tr>
         </table>
       `;
     } else {
@@ -2312,7 +2376,7 @@ export default function App() {
         return `
           <div style="margin-top:20px;">
             <div style="background:#f1f5f9;padding:8px 10px;font-weight:bold;font-size:12px;border:1px solid #cbd5e1;border-bottom:0;">
-              Staf: ${s.name} &nbsp;|&nbsp; ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;|&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;|&nbsp; Departemen: ${s.department} &nbsp;|&nbsp; ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})
+              Staf: ${s.name} &nbsp;|&nbsp; ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;|&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;|&nbsp; Departemen: ${s.department}${s.role === "staff" ? ` &nbsp;|&nbsp; Mengetahui: Ketua Tim ${signatureGroupOf(s).label} (${teamLeadFor(staff, s)?.name || "-"})` : ""} &nbsp;|&nbsp; ${stats.total} Tugas (Selesai: ${stats.finish} [${stats.rate}%], Doing: ${stats.doing}, To Do: ${stats.todo})
             </div>
             <table class="report-table">
               <tr>
@@ -2329,12 +2393,13 @@ export default function App() {
         ${sectionsHtml}
       `;
 
+      const signer = groupedSignature(staff, displayStaffList);
       sigHtml = `
         <table class="signature-table">
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
-          <tr><td><b>Kepala Loka Rehabilitasi Narkotika Kalianda</b></td><td><b>Penanggung Jawab Admin &amp; SDM</b></td></tr>
+          <tr><td><b>${signer.title}</b></td><td><b>Penanggung Jawab Admin &amp; SDM</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>Heru Herlambang, S. AP</b></td><td><b>Daniel, Amd.Kep</b></td></tr>
+          <tr><td><b>${signer.name}</b></td><td><b>Daniel, Amd.Kep</b></td></tr>
         </table>
       `;
     }
@@ -2386,6 +2451,7 @@ export default function App() {
         </tr>`;
       }).join("");
 
+      const pdfSigner = knowingSignature(staff, targetStaff);
       contentHtml = `
         <div class="staff-header-card">
           <table style="width:100%;font-size:11px;border-collapse:collapse;">
@@ -2434,9 +2500,9 @@ export default function App() {
       sigHtml = `
         <table class="signature-table">
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
-          <tr><td><b>Kepala Loka Rehabilitasi Narkotika Kalianda</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
+          <tr><td><b>${pdfSigner.title}</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>Heru Herlambang, S. AP</b></td><td><b>${targetStaff.name}</b></td></tr>
+          <tr><td><b>${pdfSigner.name}</b></td><td><b>${targetStaff.name}</b></td></tr>
         </table>
       `;
     } else {
@@ -2482,7 +2548,7 @@ export default function App() {
               <div>
                 <strong>${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
                 <div style="font-weight:normal;font-size:10px;color:#475569;margin-top:2px;">
-                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}
+                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}${s.role === "staff" ? ` &nbsp;·&nbsp; Mengetahui: Ketua Tim ${signatureGroupOf(s).label} (${teamLeadFor(staff, s)?.name || "-"})` : ""}
                 </div>
               </div>
               <div style="font-size:10px;font-weight:600;color:#1e3d75;">
@@ -2518,12 +2584,13 @@ export default function App() {
         ${staffSections}
       `;
 
+      const pdfSigner = groupedSignature(staff, displayStaffList);
       sigHtml = `
         <table class="signature-table">
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
-          <tr><td><b>Kepala Loka Rehabilitasi Narkotika Kalianda</b></td><td><b>Penanggung Jawab Admin &amp; SDM</b></td></tr>
+          <tr><td><b>${pdfSigner.title}</b></td><td><b>Penanggung Jawab Admin &amp; SDM</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>Heru Herlambang, S. AP</b></td><td><b>Daniel, Amd.Kep</b></td></tr>
+          <tr><td><b>${pdfSigner.name}</b></td><td><b>Daniel, Amd.Kep</b></td></tr>
         </table>
       `;
     }
