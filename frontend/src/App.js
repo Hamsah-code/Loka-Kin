@@ -509,6 +509,8 @@ function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }
   });
 
   const statusChanged = isEditing && form.status !== initialStatus;
+  // Link dokumen & foto kegiatan hanya berlaku untuk Doing/Finish.
+  const evidenceAllowed = form.status === "doing" || form.status === "finish";
 
   // Tugas pertama pada daftar mengikuti status laporan; tugas tambahan selalu masuk To Do List.
   const targetLabelFor = (idx) => {
@@ -581,12 +583,19 @@ function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }
 
     const currentNow = toDateTimeInput(new Date());
     const primary = cleaned[0];
+    const allowEvidence = form.status === "doing" || form.status === "finish";
     const payload = {
       ...form,
       title: primary.title,
       priority: primary.priority,
       target: primary.target,
       due_date: primary.due_date,
+      // Kolom Catatan dihapus dari form, jadi tidak ada catatan yang disimpan.
+      notes: "",
+      // Link dokumen & foto hanya disimpan untuk Doing/Finish; To Do List dikosongkan.
+      proof_link: allowEvidence ? (form.proof_link || "").trim() : "",
+      photo_data: allowEvidence ? form.photo_data : "",
+      photo_name: allowEvidence ? form.photo_name : "",
     };
 
     // Rekam perubahan target riil ke riwayat
@@ -603,7 +612,7 @@ function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }
           status: form.status,
           target: primary.target,
           timestamp: transitionTime,
-          note: form.notes ? `Catatan: ${form.notes.slice(0, 50)}` : `Target riil saat status ${form.status.toUpperCase()}`,
+          note: `Target riil saat status ${form.status.toUpperCase()}`,
         },
       ];
     } else if (!isEditing) {
@@ -838,16 +847,30 @@ function TaskModal({ task, staff, allowStaffSelection = false, onClose, onSave }
             </div>
           </div>
 
-          <label className="full">Catatan<textarea data-testid="task-notes-input" name="notes" value={form.notes} onChange={change} placeholder="Tambahkan konteks pekerjaan..." /></label>
-          <label className="full">Link bukti / dokumen<input data-testid="task-proof-input" name="proof_link" value={form.proof_link} onChange={change} placeholder="https://..." /></label>
-          <label className="full photo-upload-label">Foto kegiatan
-            <input className="photo-input" type="file" accept="image/*" data-testid="task-photo-input" onChange={uploadPhoto} />
-            <span className="photo-dropzone"><Camera size={18} /><span>{form.photo_name || "Pilih foto kegiatan (maks. 5 MB)"}</span></span>
-          </label>
-          {form.photo_data && (
-            <div className="photo-preview-wrap full">
-              <img src={form.photo_data} alt="Pratinjau kegiatan" data-testid="task-photo-preview" />
-              <button type="button" className="remove-photo" data-testid="remove-photo-button" onClick={() => setForm({ ...form, photo_data: "", photo_name: "" })}><X size={14} /> Hapus foto</button>
+          {/* Bukti dokumen & foto hanya untuk status Doing dan Finish (To Do List tanpa bukti). */}
+          {evidenceAllowed ? (
+            <>
+              <label className="full">Link dokumen / bukti
+                <input data-testid="task-proof-input" name="proof_link" value={form.proof_link} onChange={change} placeholder="https://..." />
+              </label>
+              <label className="full photo-upload-label">Foto kegiatan
+                <input className="photo-input" type="file" accept="image/*" data-testid="task-photo-input" onChange={uploadPhoto} />
+                <span className="photo-dropzone"><Camera size={18} /><span>{form.photo_name || "Pilih foto kegiatan (maks. 5 MB)"}</span></span>
+              </label>
+              {form.photo_data && (
+                <div className="photo-preview-wrap full">
+                  <img src={form.photo_data} alt="Pratinjau kegiatan" data-testid="task-photo-preview" />
+                  <button type="button" className="remove-photo" data-testid="remove-photo-button" onClick={() => setForm({ ...form, photo_data: "", photo_name: "" })}><X size={14} /> Hapus foto</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="status-notice full" data-testid="todo-evidence-notice">
+              <AlertCircle size={15} />
+              <span>
+                Link dokumen bukti dan foto kegiatan hanya dapat diisi saat status <b>Doing</b> atau <b>Finish</b>.
+                Laporan To Do List cukup memuat rencana tugas, prioritas, target riil, dan tenggat.
+              </span>
             </div>
           )}
 
@@ -2116,6 +2139,11 @@ export default function App() {
       updatedTask.finish_at = transitionTime;
     } else if (nextStatus === "todo") {
       updatedTask.todo_at = transitionTime;
+      // Catatan dihapus dari laporan; bukti dokumen & foto hanya untuk Doing/Finish.
+      updatedTask.notes = "";
+      updatedTask.proof_link = "";
+      updatedTask.photo_data = "";
+      updatedTask.photo_name = "";
     }
 
     try {
