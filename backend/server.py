@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
 from secrets import token_urlsafe, randbelow
@@ -2123,272 +2123,388 @@ async def delete_task(task_id: str, user: Dict[str, Any] = Depends(get_current_u
     return {"ok": True}
 
 
-@api.get("/analytics")
-async def analytics(user: Dict[str, Any] = Depends(get_current_user)):
-    await seed_data()
-    task_query = {} if is_report_manager(user) else {"staff_id": user["id"]}
-    tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(500)
-    for t in tasks:
-        if t.get("status") == "plan":
-            t["status"] = "todo"
+ANALYTICS_SECTIONS = [
+    {
+        "id": "umum",
+        "title": "Bagian Umum",
+        "short": "Umum",
+        "tagline": "Tata usaha, keuangan, SDM, perencanaan, humas & sarana prasarana",
+        "departments": ["Umum", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
+        "icon": "Building2",
+        "color": "blue",
+        "code_prefix": "UM",
+    },
+    {
+        "id": "medis",
+        "title": "Layanan Rehabilitasi Medis",
+        "short": "Medis",
+        "tagline": "Dokter, keperawatan, farmasi klinis, gizi, sanitasi & fisioterapi",
+        "departments": ["Layanan Rehabilitasi Medis"],
+        "icon": "Stethoscope",
+        "color": "emerald",
+        "code_prefix": "MED",
+    },
+    {
+        "id": "sosial",
+        "title": "Layanan Rehabilitasi Sosial",
+        "short": "Sosial",
+        "tagline": "Asesmen sosial, bimbingan, pelatihan vokasional & reintegrasi",
+        "departments": ["Layanan Rehabilitasi Sosial"],
+        "icon": "HeartHandshake",
+        "color": "amber",
+        "code_prefix": "SOS",
+    },
+]
+
+# Standar mutu seragam untuk ketiga indikator ringkas.
+ANALYTICS_INDICATOR_TARGET = 95.0
+JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
+
+
+def parse_local_datetime(value: Any) -> Optional[datetime]:
+    """Baca timestamp laporan; nilai tanpa zona dianggap waktu Asia/Jakarta."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=JAKARTA_TZ) if parsed.tzinfo is None else parsed.astimezone(JAKARTA_TZ)
+
+
+def parse_due_date(value: Any) -> Optional[date]:
+    """Baca tenggat laporan (tanggal, 'Hari ini', atau dd/mm/yyyy)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    lowered = text.lower()
+    today = datetime.now(JAKARTA_TZ).date()
+    if lowered in {"hari ini", "today"}:
+        return today
+    if lowered in {"besok", "tomorrow"}:
+        return today + timedelta(days=1)
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def task_finish_datetime(task: Dict[str, Any]) -> Optional[datetime]:
+    for key in ("finish_at", "status_updated_at", "doing_at", "todo_at", "created_at"):
+        parsed = parse_local_datetime(task.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def task_created_date(task: Dict[str, Any]) -> Optional[date]:
+    parsed = parse_local_datetime(task.get("created_at")) or parse_local_datetime(task.get("todo_at"))
+    return parsed.date() if parsed else None
+
+
+def build_trends(tasks: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Tren produktivitas nyata: jumlah laporan masuk & selesai per periode."""
+    today = datetime.now(JAKARTA_TZ).date()
+    created = [(task_created_date(t), t) for t in tasks]
+    finished = [(task_finish_datetime(t), t) for t in tasks]
+
+    daily: List[Dict[str, Any]] = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        daily.append({
+            "label": day.strftime("%d %b"),
+            "total": sum(1 for created_at, _ in created if created_at == day),
+            "finish": sum(1 for finished_at, t in finished
+                          if finished_at and finished_at.date() == day and normalize_task_status(t.get("status")) == "finish"),
+        })
+
+    weekly: List[Dict[str, Any]] = []
+    monday = today - timedelta(days=(today.weekday()))
+    for offset in range(3, -1, -1):
+        start = monday - timedelta(weeks=offset)
+        end = start + timedelta(days=6)
+        weekly.append({
+            "label": f"Minggu {4 - offset}",
+            "range": f"{start.strftime('%d/%m')}–{end.strftime('%d/%m')}",
+            "total": sum(1 for created_at, _ in created if created_at and start <= created_at <= end),
+            "finish": sum(1 for finished_at, t in finished
+                          if finished_at and start <= finished_at.date() <= end and normalize_task_status(t.get("status")) == "finish"),
+        })
+
+    monthly: List[Dict[str, Any]] = []
+    for offset in range(5, -1, -1):
+        month = (today.replace(day=1) - timedelta(days=1)) if offset == 0 else None
+        year = today.year
+        month_index = today.month - offset
+        while month_index <= 0:
+            month_index += 12
+            year -= 1
+        label = datetime(year, month_index, 1).strftime("%b")
+        monthly.append({
+            "label": label,
+            "total": sum(1 for created_at, _ in created
+                         if created_at and created_at.year == year and created_at.month == month_index),
+            "finish": sum(1 for finished_at, t in finished
+                          if finished_at and finished_at.year == year and finished_at.month == month_index
+                          and normalize_task_status(t.get("status")) == "finish"),
+        })
+
+    return {"daily": daily, "weekly": weekly, "monthly": monthly}
+
+
+def status_counts(tasks: List[Dict[str, Any]]) -> Dict[str, int]:
+    statuses = [normalize_task_status(t.get("status")) or "todo" for t in tasks]
     counts = {
-        "todo": sum(1 for t in tasks if t["status"] == "todo"),
-        "doing": sum(1 for t in tasks if t["status"] == "doing"),
-        "finish": sum(1 for t in tasks if t["status"] == "finish"),
+        "todo": sum(1 for status in statuses if status == "todo"),
+        "doing": sum(1 for status in statuses if status == "doing"),
+        "finish": sum(1 for status in statuses if status == "finish"),
     }
-    counts["plan"] = counts["todo"]  # Backward compatibility alias
+    counts["plan"] = counts["todo"]  # alias kompatibilitas
+    return counts
+
+
+def percentage_split(counts: Dict[str, int]) -> Dict[str, int]:
     total = max(counts["todo"] + counts["doing"] + counts["finish"], 1)
-    now = datetime.now(timezone.utc)
-    daily = [{"label": (now - timedelta(days=i)).strftime("%d %b"), "total": max(1, len(tasks) - i % 3), "finish": max(0, counts["finish"] - i % 2)} for i in range(6, -1, -1)]
-    weekly = [{"label": f"Minggu {i}", "total": max(1, len(tasks) + i), "finish": max(0, counts["finish"] + i % 2)} for i in range(1, 5)]
-    monthly = [{"label": (now - timedelta(days=30 * i)).strftime("%b"), "total": max(1, len(tasks) + i * 2), "finish": max(0, counts["finish"] + i)} for i in range(5, -1, -1)]
-    staff_query = {} if is_report_manager(user) else {"id": user["id"]}
-    staff_rows = await db.staff.find(staff_query, {"_id": 0}).to_list(500)
-    staff_departments = {person["id"]: person.get("department", "") for person in staff_rows}
-    departments = [{"name": department, "total": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department), "finish": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department and t["status"] == "finish")} for department in DEPARTMENTS]
-    kpi_data = compute_kpi_metrics(tasks, staff_rows)
-    return {
-        "total_tasks": len(tasks),
-        "counts": counts,
-        "percentages": {k: round(v / total * 100) for k, v in counts.items()},
-        "completion_rate": round(counts["finish"] / total * 100),
-        "trends": {"daily": daily, "weekly": weekly, "monthly": monthly},
-        "departments": departments,
-        "total_staff": len(staff_rows),
-        "kpi": kpi_data,
-    }
+    return {key: round(counts[key] / total * 100) for key in ("todo", "doing", "finish", "plan")}
 
 
-def compute_kpi_metrics(tasks, staff_rows):
-    section_configs = [
+def deadline_adherence(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Hitung ketepatan tenggat: selesai ≤ akhir hari tenggat."""
+    today = datetime.now(JAKARTA_TZ).date()
+    evaluated = 0
+    on_time = 0
+    late = 0
+    for task in tasks:
+        due = parse_due_date(task.get("due_date"))
+        if not due:
+            continue
+        status = normalize_task_status(task.get("status")) or "todo"
+        finished_at = task_finish_datetime(task)
+        if status == "finish" and finished_at:
+            evaluated += 1
+            if finished_at.date() <= due:
+                on_time += 1
+            else:
+                late += 1
+        elif status != "finish" and due < today:
+            # Belum selesai padahal tenggat sudah lewat = terlambat.
+            evaluated += 1
+            late += 1
+    rate = round(on_time / evaluated * 100, 1) if evaluated else 0.0
+    return {"evaluated": evaluated, "on_time": on_time, "late": late, "rate": rate}
+
+
+def quality_status(realization: float, target: float, has_data: bool) -> tuple[str, str]:
+    if not has_data:
+        return "Belum Ada Data", "blue"
+    if realization >= target:
+        return "Target Tercapai", "green"
+    if realization >= target * 0.9:
+        return "Mendekati Target", "amber"
+    return "Perlu Perhatian", "red"
+
+
+def compute_section_metrics(tasks: List[Dict[str, Any]], staff_rows: List[Dict[str, Any]],
+                            section: Dict[str, Any]) -> Dict[str, Any]:
+    """Ringkasan satu bagian: laporan harian, status penyelesaian, dan tenggat waktu."""
+    departments_in_section = set(section["departments"])
+    staff_in_section = [s for s in staff_rows if (s.get("department") or "") in departments_in_section]
+    staff_ids = {s["id"] for s in staff_in_section}
+    section_tasks = [t for t in tasks if t.get("staff_id") in staff_ids]
+
+    counts = status_counts(section_tasks)
+    total = counts["todo"] + counts["doing"] + counts["finish"]
+    completion_rate = round(counts["finish"] / total * 100, 1) if total else 0.0
+
+    # Indikator 1: disiplin laporan harian = staf yang melaporkan / staf aktif unit.
+    reporting_staff = {t.get("staff_id") for t in section_tasks if t.get("staff_id")}
+    reporting_rate = round(len(reporting_staff) / len(staff_in_section) * 100, 1) if staff_in_section else 0.0
+
+    adherence = deadline_adherence(section_tasks)
+    has_deadline_data = adherence["evaluated"] > 0
+
+    target = ANALYTICS_INDICATOR_TARGET
+    raw_indicators = [
         {
-            "id": "umum",
-            "title": "Bagian Umum",
-            "tagline": "Tata Usaha, Keuangan, SDM, Sarpras, Perencanaan & Humas",
-            "departments": ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Umum", "Sarana & Prasarana"],
-            "icon": "Building2",
-            "color": "blue",
-            "indicators": [
-                {
-                    "code": "KPI-UM-01",
-                    "name": "Disiplin Pelaporan Kinerja Harian & Kehadiran",
-                    "desc": "Kepatuhan staf dalam pengisian laporan harian kerja serta ketepatan jam kerja",
-                    "target": 95,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": 0,
-                },
-                {
-                    "code": "KPI-UM-02",
-                    "name": "Akuntabilitas Administrasi & Realisasi Keuangan",
-                    "desc": "Penyelesaian SPJ belanja, laporan kas bendahara, dan ketertiban tata persuratan",
-                    "target": 90,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": -2,
-                },
-                {
-                    "code": "KPI-UM-03",
-                    "name": "Kesiapan & Pemeliharaan Sarana Prasarana (Sarpras)",
-                    "desc": "Kelaikan fasilitas gedung, kebersihan lingkungan loka, utilitas air/listrik, dan keamanan",
-                    "target": 92,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": 1,
-                },
-                {
-                    "code": "KPI-UM-04",
-                    "name": "Kecepatan Respon Humas & Koordinasi Eksternal",
-                    "desc": "Kecepatan penanganan permohonan informasi publik dan koordinasi lintas sektor BNN",
-                    "target": 90,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": 3,
-                },
-            ],
+            "code": f"KPI-{section.get('code_prefix', section['id'][:3].upper())}-01",
+            "name": "Laporan Kinerja Harian",
+            "desc": (
+                f"{len(reporting_staff)} dari {len(staff_in_section)} staf unit mengisi laporan kinerja harian "
+                f"({total} laporan tercatat pada periode analitik)."
+            ),
+            "target": target,
+            "realization": reporting_rate,
+            "weight": 34,
+            "data_points": len(reporting_staff),
+            "has_data": bool(staff_in_section),
         },
         {
-            "id": "medis",
-            "title": "Layanan Rehabilitasi Medis",
-            "tagline": "Dokter, Keperawatan, Farmasi Klinis, Gizi, Sanitasi & Fisioterapi",
-            "departments": ["Layanan Rehabilitasi Medis", "Clinical Supervisor"],
-            "icon": "Stethoscope",
-            "color": "emerald",
-            "indicators": [
-                {
-                    "code": "KPI-MED-01",
-                    "name": "Ketuntasan Asesmen Medis Awal & Detoksifikasi",
-                    "desc": "Pemeriksaan fisik, skrining infeksi (HIV/Hepatitis/TBC), dan manajemen putus zat dalam 24 jam",
-                    "target": 95,
-                    "weight": 30,
-                    "unit": "%",
-                    "mod": 2,
-                },
-                {
-                    "code": "KPI-MED-02",
-                    "name": "Kepatuhan Terapi Obat & Zero Medication Error",
-                    "desc": "Ketepatan pemberian obat farmakologi, pencatatan resep klinis, dan nihil kesalahan pemberian obat",
-                    "target": 98,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": -1,
-                },
-                {
-                    "code": "KPI-MED-03",
-                    "name": "Status Kesehatan & Pemenuhan Gizi Klinis Residen",
-                    "desc": "Monitoring indeks massa tubuh (IMT), asupan nutrisi seimbang, dan peningkatan kebugaran fisik",
-                    "target": 90,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": 1,
-                },
-                {
-                    "code": "KPI-MED-04",
-                    "name": "Kepatuhan Sanitasi Lingkungan & Sterilisasi Medis",
-                    "desc": "Baku mutu kebersihan ruang rawat, sterilisasi alat medis, dan pembuangan limbah B3 medis",
-                    "target": 92,
-                    "weight": 20,
-                    "unit": "%",
-                    "mod": 0,
-                },
-            ],
+            "code": f"KPI-{section.get('code_prefix', section['id'][:3].upper())}-02",
+            "name": "Status Penyelesaian Laporan",
+            "desc": (
+                f"{counts['finish']} laporan Finish, {counts['doing']} Doing, dan {counts['todo']} To Do List "
+                f"dari {total} laporan unit."
+            ),
+            "target": target,
+            "realization": completion_rate,
+            "weight": 33,
+            "data_points": total,
+            "has_data": total > 0,
         },
         {
-            "id": "sosial",
-            "title": "Layanan Rehabilitasi Sosial",
-            "tagline": "Konselor Adiksi, Pekerja Sosial, Psikolog Klinis & Instruktur Vokasional",
-            "departments": ["Layanan Rehabilitasi Sosial"],
-            "icon": "HeartHandshake",
-            "color": "amber",
-            "indicators": [
-                {
-                    "code": "KPI-SOS-01",
-                    "name": "Ketercapaian Sesi Konseling Adiksi & Terapi CBT",
-                    "desc": "Pelaksanaan konseling individu/kelompok dan intervensi psikologis sesuai Individual Treatment Plan",
-                    "target": 90,
-                    "weight": 30,
-                    "unit": "%",
-                    "mod": 1,
-                },
-                {
-                    "code": "KPI-SOS-02",
-                    "name": "Kepatuhan Jadwal Therapeutic Community (TC)",
-                    "desc": "Disiplin Morning Meeting, Daily Structure, House Meeting, dan pembentukan norma tanggung jawab",
-                    "target": 95,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": -2,
-                },
-                {
-                    "code": "KPI-SOS-03",
-                    "name": "Partisipasi & Kelulusan Pelatihan Vokasional Mandiri",
-                    "desc": "Tingkat keaktifan residen dalam program keterampilan kerja (pertanian, sablon, barista, kerajinan)",
-                    "target": 85,
-                    "weight": 25,
-                    "unit": "%",
-                    "mod": 3,
-                },
-                {
-                    "code": "KPI-SOS-04",
-                    "name": "Indeks Perubahan Perilaku & Kesiapan Reintegrasi",
-                    "desc": "Evaluasi perilaku adaptif residen, kesiapan kembali ke keluarga/masyarakat, dan program aftercare",
-                    "target": 88,
-                    "weight": 20,
-                    "unit": "%",
-                    "mod": 0,
-                },
-            ],
+            "code": f"KPI-{section.get('code_prefix', section['id'][:3].upper())}-03",
+            "name": "Ketepatan Tenggat Waktu Penyelesaian",
+            "desc": (
+                f"{adherence['on_time']} dari {adherence['evaluated']} laporan bertenggat selesai tepat waktu; "
+                f"{adherence['late']} terlambat."
+                if has_deadline_data else
+                "Belum ada laporan dengan tenggat waktu yang dapat dievaluasi."
+            ),
+            "target": target,
+            "realization": adherence["rate"],
+            "weight": 33,
+            "data_points": adherence["evaluated"],
+            "has_data": has_deadline_data,
         },
     ]
 
-    results = []
-    for cfg in section_configs:
-        depts = cfg["departments"]
-        staff_in_sec = [s for s in staff_rows if s.get("department") in depts]
-        sec_staff_ids = {s["id"] for s in staff_in_sec}
-        sec_tasks = [t for t in tasks if t.get("staff_id") in sec_staff_ids]
-        
-        sec_total_tasks = len(sec_tasks)
-        sec_finish_tasks = sum(1 for t in sec_tasks if t.get("status") == "finish")
-        sec_doing_tasks = sum(1 for t in sec_tasks if t.get("status") == "doing")
-        sec_todo_tasks = sum(1 for t in sec_tasks if t.get("status") in ["todo", "plan"])
-        
-        task_completion_rate = (sec_finish_tasks / sec_total_tasks * 100) if sec_total_tasks > 0 else 80.0
-        
-        computed_indicators = []
-        weighted_score_sum = 0
-        
-        for ind in cfg["indicators"]:
-            baseline = ind["target"]
-            task_factor = (task_completion_rate - 70) * 0.25
-            realization = min(100.0, max(60.0, round(baseline + ind.get("mod", 0) + task_factor, 1)))
-            achievement_rate = round((realization / ind["target"]) * 100, 1)
-            
-            if realization >= ind["target"]:
-                quality_status = "Target Tercapai"
-                status_tone = "green"
-            elif realization >= ind["target"] * 0.9:
-                quality_status = "Mendekati Target"
-                status_tone = "amber"
-            else:
-                quality_status = "Perlu Perhatian"
-                status_tone = "red"
-                
-            computed_indicators.append({
-                "code": ind["code"],
-                "name": ind["name"],
-                "desc": ind["desc"],
-                "target": ind["target"],
-                "realization": realization,
-                "unit": ind["unit"],
-                "achievement_rate": achievement_rate,
-                "weight": ind["weight"],
-                "status": quality_status,
-                "status_tone": status_tone,
-            })
-            
-            weighted_score_sum += realization * (ind["weight"] / 100.0)
-
-        section_score = round(weighted_score_sum, 1)
-        target_avg = round(sum(ind["target"] * (ind["weight"] / 100.0) for ind in cfg["indicators"]), 1)
-        section_achievement = round((section_score / target_avg) * 100, 1) if target_avg > 0 else 100.0
-
-        if section_achievement >= 100.0:
-            overall_badge = "Sangat Baik (A)"
-            overall_tone = "green"
-        elif section_achievement >= 90.0:
-            overall_badge = "Baik (B)"
-            overall_tone = "blue"
-        elif section_achievement >= 75.0:
-            overall_badge = "Cukup (C)"
-            overall_tone = "amber"
-        else:
-            overall_badge = "Perlu Peningkatan"
-            overall_tone = "red"
-
-        results.append({
-            "id": cfg["id"],
-            "title": cfg["title"],
-            "tagline": cfg["tagline"],
-            "color": cfg["color"],
-            "icon": cfg["icon"],
-            "staff_count": len(staff_in_sec),
-            "task_stats": {
-                "total": sec_total_tasks,
-                "finish": sec_finish_tasks,
-                "doing": sec_doing_tasks,
-                "todo": sec_todo_tasks,
-                "completion_rate": round(task_completion_rate, 1),
-            },
-            "overall_score": section_score,
-            "target_avg": target_avg,
-            "achievement_rate": section_achievement,
-            "overall_badge": overall_badge,
-            "overall_tone": overall_tone,
-            "indicators": computed_indicators,
+    indicators = []
+    weighted_sum = 0.0
+    active_weight = 0.0
+    for raw in raw_indicators:
+        status_label, tone = quality_status(raw["realization"], raw["target"], raw["has_data"])
+        achievement = round((raw["realization"] / raw["target"]) * 100, 1) if raw["has_data"] else 0.0
+        indicators.append({
+            "code": raw["code"],
+            "name": raw["name"],
+            "desc": raw["desc"],
+            "target": raw["target"],
+            "realization": raw["realization"],
+            "unit": "%",
+            "achievement_rate": min(achievement, 200.0),
+            "weight": raw["weight"],
+            "status": status_label,
+            "status_tone": tone,
+            "data_points": raw["data_points"],
+            "has_data": raw["has_data"],
         })
-        
-    return results
+        if raw["has_data"]:
+            weighted_sum += raw["realization"] * raw["weight"]
+            active_weight += raw["weight"]
+
+    # Indikator yang belum punya data tidak menurunkan skor bagian.
+    section_score = round(weighted_sum / active_weight, 1) if active_weight else 0.0
+    achievement_rate = round((section_score / target) * 100, 1) if target else 0.0
+    if not total and not staff_in_section:
+        overall_badge, overall_tone = "Belum Ada Data", "blue"
+    elif achievement_rate >= 100:
+        overall_badge, overall_tone = "Sangat Baik (A)", "green"
+    elif achievement_rate >= 90:
+        overall_badge, overall_tone = "Baik (B)", "blue"
+    elif achievement_rate >= 75:
+        overall_badge, overall_tone = "Cukup (C)", "amber"
+    else:
+        overall_badge, overall_tone = "Perlu Peningkatan", "red"
+
+    department_breakdown = []
+    for department in section["departments"]:
+        dept_tasks = [t for t in section_tasks
+                      if next((s for s in staff_in_section if s["id"] == t.get("staff_id")), {}).get("department") == department]
+        dept_counts = status_counts(dept_tasks)
+        department_breakdown.append({
+            "name": department,
+            "total": len(dept_tasks),
+            "finish": dept_counts["finish"],
+            "doing": dept_counts["doing"],
+            "todo": dept_counts["todo"],
+        })
+
+    return {
+        "id": section["id"],
+        "title": section["title"],
+        "short": section["short"],
+        "tagline": section["tagline"],
+        "icon": section["icon"],
+        "color": section["color"],
+        "departments": section["departments"],
+        "staff_count": len(staff_in_section),
+        "reporting_staff": len(reporting_staff),
+        "total_tasks": total,
+        "counts": counts,
+        "percentages": percentage_split(counts),
+        "completion_rate": completion_rate,
+        "deadline": adherence,
+        "trends": build_trends(section_tasks),
+        "departments_breakdown": department_breakdown,
+        "overall_score": section_score,
+        "target_avg": target,
+        "achievement_rate": achievement_rate,
+        "overall_badge": overall_badge,
+        "overall_tone": overall_tone,
+        "indicators": indicators,
+    }
+
+
+@api.get("/analytics")
+async def analytics(user: Dict[str, Any] = Depends(get_current_user)):
+    """Analitik ringkas: laporan harian, status, dan tenggat per bagian Umum/Medis/Sosial."""
+    await seed_data()
+    task_query = {} if is_report_manager(user) else {"staff_id": user["id"]}
+    tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(500)
+    for task in tasks:
+        if task.get("status") == "plan":
+            task["status"] = "todo"
+
+    counts = status_counts(tasks)
+    total = max(counts["todo"] + counts["doing"] + counts["finish"], 1)
+    percentages = percentage_split(counts)
+
+    staff_query = {} if is_report_manager(user) else {"id": user["id"]}
+    staff_rows = await db.staff.find(staff_query, {"_id": 0}).to_list(500)
+
+    sections = [compute_section_metrics(tasks, staff_rows, section) for section in ANALYTICS_SECTIONS]
+
+    # Kompatibilitas: daftar departemen lengkap tetap dikirim untuk konsumen lama.
+    staff_departments = {person["id"]: person.get("department", "") for person in staff_rows}
+    departments = [
+        {
+            "name": department,
+            "total": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department),
+            "finish": sum(1 for t in tasks if staff_departments.get(t["staff_id"]) == department
+                          and normalize_task_status(t.get("status")) == "finish"),
+        }
+        for department in DEPARTMENTS
+    ]
+
+    return {
+        "total_tasks": len(tasks),
+        "counts": counts,
+        "percentages": percentages,
+        "completion_rate": round(counts["finish"] / total * 100),
+        "trends": build_trends(tasks),
+        "departments": departments,
+        "total_staff": len(staff_rows),
+        "kpi": sections,
+        "sections": sections,
+        "unit_groups": [
+            {
+                "id": section["id"],
+                "name": section["title"],
+                "short": section["short"],
+                "total": section["total_tasks"],
+                "finish": section["counts"]["finish"],
+                "doing": section["counts"]["doing"],
+                "todo": section["counts"]["todo"],
+                "completion_rate": section["completion_rate"],
+                "staff_count": section["staff_count"],
+            }
+            for section in sections
+        ],
+        "indicator_target": ANALYTICS_INDICATOR_TARGET,
+    }
 
 
 @api.post("/export")

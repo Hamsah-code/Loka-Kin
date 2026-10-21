@@ -659,15 +659,27 @@ def test_analytics_shape(client):
     assert data["total_staff"] >= 78
     assert 0 <= data["completion_rate"] <= 100
 
-    # Validasi KPI (Key Performance Indicators) per bagian
+    # Validasi KPI ringkas: 3 indikator (laporan harian, status, tenggat) per bagian
     assert "kpi" in data and isinstance(data["kpi"], list)
     kpi_ids = {sec["id"] for sec in data["kpi"]}
-    assert {"umum", "medis", "sosial"}.issubset(kpi_ids)
+    assert kpi_ids == {"umum", "medis", "sosial"}
     for sec in data["kpi"]:
-        assert {"id", "title", "overall_score", "indicators"}.issubset(sec.keys())
-        assert len(sec["indicators"]) >= 4
+        assert {"id", "title", "overall_score", "indicators", "completion_rate", "trends"}.issubset(sec.keys())
+        assert len(sec["indicators"]) == 3
+        names = [ind["name"] for ind in sec["indicators"]]
+        assert names == [
+            "Laporan Kinerja Harian",
+            "Status Penyelesaian Laporan",
+            "Ketepatan Tenggat Waktu Penyelesaian",
+        ]
         for ind in sec["indicators"]:
             assert {"code", "name", "target", "realization", "status"}.issubset(ind.keys())
+            assert ind["target"] == 95.0
+    # Kelompok unit ringkas: hanya Umum, Medis, Sosial (Clinical Supervisor disembunyikan)
+    assert {group["id"] for group in data["unit_groups"]} == {"umum", "medis", "sosial"}
+    assert "Clinical Supervisor" not in {
+        department for sec in data["kpi"] for department in sec["departments"]
+    }
 
 
 # ---------- Export ----------

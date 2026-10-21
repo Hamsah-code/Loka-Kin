@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle, ArrowRight, Award, BarChart3, Building2, Calendar, Camera, CheckCircle2, ClipboardList, Clock, Download, FileSpreadsheet, FileText,
-  HeartHandshake, History, Home, KeyRound, Layers, LayoutDashboard, LockKeyhole, LogOut, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
+  HeartHandshake, History, Home, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, Moon, Pencil, Plus, Printer, Search, Settings2, Stethoscope, Sun, Target, Trash2, TrendingUp, Users, X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import "@/App.css";
@@ -1569,189 +1569,79 @@ function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCod
   );
 }
 
-function KpiDashboard({ kpiList = [] }) {
-  const [activeTab, setActiveTab] = useState("all");
+const sectionIconMap = {
+  Building2,
+  Stethoscope,
+  HeartHandshake,
+};
 
-  const iconMap = {
-    Building2: Building2,
-    Stethoscope: Stethoscope,
-    HeartHandshake: HeartHandshake,
-  };
-
-  const displayedSections = activeTab === "all"
-    ? kpiList
-    : kpiList.filter((s) => s.id === activeTab);
-
+function SectionTabs({ sections, active, onChange }) {
   return (
-    <div className="kpi-container" data-testid="kpi-dashboard">
-      <div className="kpi-header">
-        <div>
-          <span className="eyebrow">KEY PERFORMANCE INDICATORS (KPI) LOKA KALIANDA</span>
-          <h2 style={{ margin: "4px 0", fontSize: 20, fontWeight: 700, color: "var(--ink)" }}>
-            Indikator Kinerja &amp; Standar Mutu Layanan
-          </h2>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
-            Evaluasi capaian mutu komprehensif bagian Umum, Layanan Medis, dan Layanan Sosial berbasis agregasi laporan harian staf.
-          </p>
-        </div>
-
-        {/* Section Filter Tabs */}
-        <div className="kpi-tabs" data-testid="kpi-tabs">
-          <button
-            className={`kpi-tab ${activeTab === "all" ? "active" : ""}`}
-            data-testid="kpi-tab-all"
-            onClick={() => setActiveTab("all")}
-          >
-            <Layers size={14} /> Semua Bagian ({kpiList.length})
-          </button>
-          {kpiList.map((sec) => {
-            const Icon = iconMap[sec.icon] || Building2;
-            return (
-              <button
-                key={sec.id}
-                className={`kpi-tab ${activeTab === sec.id ? "active" : ""}`}
-                data-testid={`kpi-tab-${sec.id}`}
-                onClick={() => setActiveTab(sec.id)}
-              >
-                <Icon size={14} /> {sec.title.replace("Bagian ", "").replace("Layanan Rehabilitasi ", "")}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* KPI Summary Cards Grid */}
-      <div className="kpi-cards-grid">
-        {kpiList.map((sec) => {
-          const Icon = iconMap[sec.icon] || Building2;
-          const isSelected = activeTab === "all" || activeTab === sec.id;
-          return (
-            <div
-              className="kpi-card"
-              data-testid={`kpi-card-${sec.id}`}
-              key={sec.id}
-              style={{
-                opacity: isSelected ? 1 : 0.65,
-                borderColor: activeTab === sec.id ? "#2563eb" : undefined,
-                boxShadow: activeTab === sec.id ? "0 0 0 2px #2563eb33" : undefined,
-                cursor: "pointer",
-              }}
-              onClick={() => setActiveTab(activeTab === sec.id ? "all" : sec.id)}
-            >
-              <div className="kpi-card-top">
-                <div className={`kpi-card-icon ${sec.color}`}>
-                  <Icon size={20} />
-                </div>
-                <span className={`kpi-badge ${sec.overall_tone}`}>
-                  <Award size={11} />
-                  {sec.overall_badge}
-                </span>
-              </div>
-
-              <div className="kpi-card-titles">
-                <h3>{sec.title}</h3>
-                <p>{sec.tagline}</p>
-              </div>
-
-              <div className="kpi-score-display">
-                <span className="kpi-score-big">{sec.overall_score}%</span>
-                <span className="kpi-target-label">
-                  Target Mutu: <b>{sec.target_avg}%</b> · Capaian: <b>{sec.achievement_rate}%</b>
-                </span>
-              </div>
-
-              <div className="kpi-progress-wrap">
-                <div className="kpi-progress-track">
-                  <div
-                    className={`kpi-progress-bar ${sec.color}`}
-                    style={{ width: `${Math.min(100, sec.overall_score)}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className="kpi-meta-pills">
-                <span>Staf Aktif: <strong>{sec.staff_count} orang</strong></span>
-                <span>Tugas Unit: <strong>{sec.task_stats?.finish || 0} Selesai / {sec.task_stats?.total || 0}</strong></span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Detailed Indicators Table per Section */}
-      {displayedSections.map((sec) => {
-        const Icon = iconMap[sec.icon] || Building2;
+    <div className="kpi-tabs" data-testid="analytics-section-tabs" role="tablist" aria-label="Pilih bagian analitik">
+      {sections.map((sec) => {
+        const Icon = sectionIconMap[sec.icon] || Building2;
         return (
-          <div className="kpi-detail-panel" data-testid={`kpi-detail-${sec.id}`} key={sec.id}>
-            <div className="kpi-detail-head">
-              <div className="kpi-detail-head-left">
-                <h3>
-                  <Icon size={18} />
-                  <span>Rincian Indikator Kinerja &amp; Mutu · {sec.title}</span>
-                </h3>
-                <p>{sec.tagline} · Evaluasi berbasis {sec.staff_count} staf penanggung jawab</p>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span className={`kpi-badge ${sec.overall_tone}`}>
-                  <TrendingUp size={12} />
-                  Skor Mutu: {sec.overall_score}% ({sec.overall_badge})
-                </span>
-              </div>
-            </div>
+          <button
+            key={sec.id}
+            type="button"
+            role="tab"
+            aria-selected={active === sec.id}
+            className={`kpi-tab ${active === sec.id ? "active" : ""}`}
+            data-testid={`analytics-tab-${sec.id}`}
+            onClick={() => onChange(sec.id)}
+          >
+            <Icon size={14} /> {sec.short || sec.title}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-            <div style={{ overflowX: "auto" }}>
-              <table className="kpi-indicators-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "35%" }}>Indikator Mutu &amp; Kinerja</th>
-                    <th style={{ width: "12%", textAlign: "center" }}>Target Standar</th>
-                    <th style={{ width: "14%", textAlign: "center" }}>Realisasi Laporan</th>
-                    <th style={{ width: "23%" }}>Tingkat Ketercapaian</th>
-                    <th style={{ width: "16%", textAlign: "center" }}>Status Mutu</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sec.indicators?.map((ind) => (
-                    <tr key={ind.code} data-testid={`kpi-row-${ind.code.toLowerCase()}`}>
-                      <td>
-                        <div className="kpi-indicator-name">
-                          <span className="kpi-indicator-code">{ind.code} · Bobot {ind.weight}%</span>
-                          <span className="kpi-indicator-title">{ind.name}</span>
-                          <span className="kpi-indicator-desc">{ind.desc}</span>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        <b style={{ fontSize: 13 }}>{ind.target}{ind.unit}</b>
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        <b style={{ fontSize: 13, color: ind.realization >= ind.target ? "#15803d" : "#b45309" }}>
-                          {ind.realization}{ind.unit}
-                        </b>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                            <span>Realisasi vs Target</span>
-                            <b>{ind.achievement_rate}%</b>
-                          </div>
-                          <div className="kpi-progress-track" style={{ height: 6 }}>
-                            <div
-                              className={`kpi-progress-bar ${ind.status_tone === "green" ? "emerald" : ind.status_tone === "amber" ? "amber" : "blue"}`}
-                              style={{ width: `${Math.min(100, ind.achievement_rate)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        <span className={`kpi-badge ${ind.status_tone}`}>
-                          {ind.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+function CompletionCard({ section }) {
+  const rate = section?.completion_rate || 0;
+  const counts = section?.counts || {};
+  const percentages = section?.percentages || {};
+  return (
+    <div className="surface big-score">
+      <div className="score-header">
+        <span className="eyebrow">COMPLETION RATE · {section?.short?.toUpperCase()}</span>
+        <span className="score-badge">{counts.finish || 0} selesai</span>
+      </div>
+      <div className="score-body">
+        <div className="score-ring" style={{ "--score": `${rate}%` }} data-testid={`completion-ring-${section?.id}`}>
+          <div className="score-ring-inner">
+            <strong data-testid={`completion-rate-${section?.id}`}>{Math.round(rate)}%</strong>
+            <small>tercapai</small>
+          </div>
+        </div>
+        <div className="score-legend">
+          <p>Persentase laporan yang telah diselesaikan pada bagian {section?.short} dari total laporan aktif unit.</p>
+          <ul>
+            <li><span className="legend-dot green" /> Selesai · {percentages.finish || 0}%</li>
+            <li><span className="legend-dot amber" /> Sedang berjalan · {percentages.doing || 0}%</li>
+            <li><span className="legend-dot blue" /> To Do List · {percentages.todo ?? percentages.plan ?? 0}%</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowCard({ section }) {
+  const counts = section?.counts || {};
+  const percentages = section?.percentages || {};
+  return (
+    <div className="surface breakdown" data-testid={`workflow-${section?.id}`}>
+      <span className="eyebrow">WORKFLOW BREAKDOWN</span>
+      <h2>Posisi laporan {section?.short}</h2>
+      {columns.map((c) => {
+        const count = counts[c.key] ?? (c.key === "todo" ? counts.plan : 0) ?? 0;
+        const pct = percentages[c.key] ?? (c.key === "todo" ? percentages.plan : 0) ?? 0;
+        return (
+          <div className="break-row" key={c.key}>
+            <span className={`column-dot ${c.color}`} /><span>{c.label}</span>
+            <b>{count}</b><small>{pct}%</small>
           </div>
         );
       })}
@@ -1759,88 +1649,223 @@ function KpiDashboard({ kpiList = [] }) {
   );
 }
 
+function TrendPanel({ section, period, onPeriodChange }) {
+  const trends = section?.trends?.[period] || [];
+  const max = Math.max(...trends.map((x) => x.total), 1);
+  return (
+    <div className="surface trend-panel" data-testid={`trend-${section?.id}`}>
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">TREN PRODUKTIVITAS · {section?.short?.toUpperCase()}</span>
+          <h2 data-testid="trend-title">
+            Laporan {period === "daily" ? "harian" : period === "weekly" ? "mingguan" : "bulanan"}
+          </h2>
+        </div>
+        <div className="period-tabs">
+          {[["daily", "Harian"], ["weekly", "Mingguan"], ["monthly", "Bulanan"]].map(([key, label]) => (
+            <button
+              className={period === key ? "period-tab active" : "period-tab"}
+              data-testid={`analytics-${key}-tab`}
+              key={key}
+              onClick={() => onPeriodChange(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="bar-chart" data-testid="trend-chart">
+        {trends.length === 0 && <p style={{ color: "var(--muted)", fontSize: 12 }}>Belum ada laporan pada periode ini.</p>}
+        {trends.map((item) => (
+          <div className="bar-group" key={`${item.label}-${item.range || ""}`}>
+            <div className="bar-value">{item.total}</div>
+            <div className="bar" style={{ height: `${item.total === 0 ? 6 : Math.max(12, (item.total / max) * 130)}px` }} />
+            <small>{item.label}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KpiSection({ section, target }) {
+  if (!section) return null;
+  return (
+    <div className="kpi-container" data-testid="kpi-dashboard">
+      <div className="kpi-header">
+        <div>
+          <span className="eyebrow">KEY PERFORMANCE INDICATORS (KPI) · {section.short?.toUpperCase()}</span>
+          <h2 style={{ margin: "4px 0", fontSize: 20, fontWeight: 700, color: "var(--ink)" }}>
+            Indikator Kinerja &amp; Standar Mutu Layanan
+          </h2>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
+            Ringkasan tiga indikator {section.title}: laporan kinerja harian, status penyelesaian, dan ketepatan
+            tenggat waktu. Standar mutu {target ?? 95}%.
+          </p>
+        </div>
+        <span className={`kpi-badge ${section.overall_tone}`} data-testid={`kpi-overall-${section.id}`}>
+          <Award size={12} /> {section.overall_score}% · {section.overall_badge}
+        </span>
+      </div>
+
+      <div className="kpi-detail-panel" data-testid={`kpi-detail-${section.id}`}>
+        <div className="kpi-detail-head">
+          <div className="kpi-detail-head-left">
+            <h3>
+              {(() => { const Icon = sectionIconMap[section.icon] || Building2; return <Icon size={18} />; })()}
+              <span>{section.title}</span>
+            </h3>
+            <p>
+              {section.tagline} · {section.staff_count} staf · {section.reporting_staff} staf melaporkan ·{" "}
+              {section.total_tasks} laporan
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className={`kpi-badge ${section.overall_tone}`}>
+              <TrendingUp size={12} /> Capaian {section.achievement_rate}% dari standar
+            </span>
+          </div>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table className="kpi-indicators-table">
+            <thead>
+              <tr>
+                <th style={{ width: "42%" }}>Indikator Mutu &amp; Kinerja</th>
+                <th style={{ width: "12%", textAlign: "center" }}>Target Standar</th>
+                <th style={{ width: "12%", textAlign: "center" }}>Realisasi</th>
+                <th style={{ width: "20%" }}>Tingkat Ketercapaian</th>
+                <th style={{ width: "14%", textAlign: "center" }}>Status Mutu</th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.indicators?.map((ind) => (
+                <tr key={ind.code} data-testid={`kpi-row-${ind.code.toLowerCase()}`}>
+                  <td>
+                    <div className="kpi-indicator-name">
+                      <span className="kpi-indicator-code">{ind.code}</span>
+                      <span className="kpi-indicator-title">{ind.name}</span>
+                      <span className="kpi-indicator-desc">{ind.desc}</span>
+                    </div>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <b style={{ fontSize: 13 }}>{ind.target}{ind.unit}</b>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    {ind.has_data ? (
+                      <b style={{ fontSize: 13, color: ind.realization >= ind.target ? "#15803d" : "#b45309" }}>
+                        {ind.realization}{ind.unit}
+                      </b>
+                    ) : (
+                      <span style={{ color: "var(--muted)", fontSize: 12 }}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                        <span>Realisasi vs Target</span>
+                        <b>{ind.has_data ? `${ind.achievement_rate}%` : "—"}</b>
+                      </div>
+                      <div className="kpi-progress-track" style={{ height: 6 }}>
+                        <div
+                          className={`kpi-progress-bar ${ind.status_tone === "green" ? "emerald" : ind.status_tone === "amber" ? "amber" : "blue"}`}
+                          style={{ width: `${Math.min(100, ind.achievement_rate)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <span className={`kpi-badge ${ind.status_tone}`}>{ind.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Analytics({ analytics }) {
   const [period, setPeriod] = useState("daily");
-  const trends = analytics.trends?.[period] || [];
-  const max = Math.max(...trends.map((x) => x.total), 1);
-  const rate = analytics.completion_rate || 0;
+  const sections = analytics.sections || analytics.kpi || [];
+  const [activeSection, setActiveSection] = useState(sections[0]?.id || "umum");
+
+  useEffect(() => {
+    if (sections.length && !sections.some((sec) => sec.id === activeSection)) {
+      setActiveSection(sections[0].id);
+    }
+  }, [sections, activeSection]);
+
+  const section = sections.find((sec) => sec.id === activeSection) || sections[0];
+  const unitGroups = analytics.unit_groups?.length
+    ? analytics.unit_groups
+    : sections.map((sec) => ({
+        id: sec.id,
+        name: sec.title,
+        short: sec.short,
+        total: sec.total_tasks,
+        finish: sec.counts?.finish || 0,
+        doing: sec.counts?.doing || 0,
+        todo: sec.counts?.todo || 0,
+        completion_rate: sec.completion_rate,
+        staff_count: sec.staff_count,
+      }));
+
   return (
     <>
-      <PageIntro title="Analitik kinerja" desc="Data Analitik Kinerja Tim harian, mingguan dan bulanan." />
-      <div className="analytics-cards">
-        <div className="surface big-score">
-          <div className="score-header">
-            <span className="eyebrow">COMPLETION RATE</span>
-            <span className="score-badge">{analytics.counts.finish} selesai</span>
-          </div>
-          <div className="score-body">
-            <div className="score-ring" style={{ "--score": `${rate}%` }} data-testid="completion-ring">
-              <div className="score-ring-inner">
-                <strong data-testid="completion-rate">{rate}%</strong>
-                <small>tercapai</small>
-              </div>
-            </div>
-            <div className="score-legend">
-              <p>Persentase laporan yang telah diselesaikan tim dari total laporan aktif.</p>
-              <ul>
-                <li><span className="legend-dot green" /> Selesai · {analytics.percentages?.finish || 0}%</li>
-                <li><span className="legend-dot amber" /> Sedang berjalan · {analytics.percentages?.doing || 0}%</li>
-                <li><span className="legend-dot blue" /> To Do List · {analytics.percentages?.todo ?? analytics.percentages?.plan ?? 0}%</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        <div className="surface breakdown">
-          <span className="eyebrow">WORKFLOW BREAKDOWN</span>
-          <h2>Posisi seluruh laporan</h2>
-          {columns.map((c) => {
-            const count = analytics.counts?.[c.key] ?? (c.key === "todo" ? analytics.counts?.plan : 0) ?? 0;
-            const pct = analytics.percentages?.[c.key] ?? (c.key === "todo" ? analytics.percentages?.plan : 0) ?? 0;
-            return (
-              <div className="break-row" key={c.key}>
-                <span className={`column-dot ${c.color}`} /><span>{c.label}</span>
-                <b>{count}</b><small>{pct}%</small>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div className="surface trend-panel">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">TREN PRODUKTIVITAS</span>
-            <h2 data-testid="trend-title">Laporan {period === "daily" ? "harian" : period === "weekly" ? "mingguan" : "bulanan"}</h2>
-          </div>
-          <div className="period-tabs">
-            {[["daily", "Harian"], ["weekly", "Mingguan"], ["monthly", "Bulanan"]].map(([key, label]) => (
-              <button className={period === key ? "period-tab active" : "period-tab"} data-testid={`analytics-${key}-tab`} key={key} onClick={() => setPeriod(key)}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div className="bar-chart" data-testid="trend-chart">
-          {trends.map((item) => (
-            <div className="bar-group" key={item.label}>
-              <div className="bar-value">{item.total}</div>
-              <div className="bar" style={{ height: `${Math.max(12, item.total / max * 130)}px` }} />
-              <small>{item.label}</small>
-            </div>
-          ))}
-        </div>
-      </div>
+      <PageIntro
+        title="Analitik kinerja"
+        desc="Ringkasan laporan kinerja harian, status penyelesaian, dan ketepatan tenggat waktu per bagian Umum, Medis, dan Sosial."
+      />
+
       <div className="surface department-panel">
-        <span className="eyebrow">PER DEPARTEMEN</span>
-        <h2>Aktivitas laporan setiap unit</h2>
+        <span className="eyebrow">AKTIVITAS LAPORAN PER UNIT</span>
+        <h2>Umum · Medis · Sosial</h2>
         <div className="department-grid">
-          {(analytics.departments || departments.map((name) => ({ name, total: 0, finish: 0 }))).map((department) => (
-            <div className="department-stat" data-testid={`department-${department.name.toLowerCase().replaceAll(" ", "-")}`} key={department.name}>
-              <span className="dept-icon"><Users size={16} /></span>
-              <div><strong>{department.name}</strong><small>{department.total} laporan tercatat</small></div>
-              <b>{department.finish || 0}</b>
-            </div>
+          {unitGroups.map((group) => (
+            <button
+              type="button"
+              className="department-stat"
+              data-testid={`department-${group.id}`}
+              key={group.id}
+              onClick={() => setActiveSection(group.id)}
+              style={{
+                cursor: "pointer",
+                textAlign: "left",
+                borderColor: activeSection === group.id ? "#2563eb" : undefined,
+                boxShadow: activeSection === group.id ? "0 0 0 2px #2563eb33" : undefined,
+                background: "transparent",
+              }}
+            >
+              <span className="dept-icon">
+                {(() => { const Icon = sectionIconMap[sections.find((s) => s.id === group.id)?.icon] || Building2; return <Icon size={16} />; })()}
+              </span>
+              <div>
+                <strong>{group.short || group.name}</strong>
+                <small>
+                  {group.total} laporan · {group.staff_count} staf · selesai {group.completion_rate}%
+                </small>
+              </div>
+              <b>{group.finish || 0}</b>
+            </button>
           ))}
         </div>
       </div>
-      <KpiDashboard kpiList={analytics.kpi || []} />
+
+      <SectionTabs sections={sections} active={activeSection} onChange={setActiveSection} />
+
+      {section && (
+        <>
+          <div className="analytics-cards">
+            <CompletionCard section={section} />
+            <WorkflowCard section={section} />
+          </div>
+          <TrendPanel section={section} period={period} onPeriodChange={setPeriod} />
+          <KpiSection section={section} target={analytics.indicator_target} />
+        </>
+      )}
     </>
   );
 }

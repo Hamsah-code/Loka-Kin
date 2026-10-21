@@ -58,6 +58,30 @@ Sebelum menerbitkan PDF, impor roster berisi **NIP/NIK resmi** melalui menu **Da
 
 Di **Pengaturan website → Kredensial pegawai**, tombol **Rotasi & unduh PDF** menerbitkan PIN sementara acak untuk semua pegawai aktif (kecuali akun Super Admin), mencabut sesi lama, lalu mengunduh PDF satu kali yang memuat NIP/NIK, PIN sementara, dan status akun. Operasi ini **mereset seluruh PIN pegawai**; PIN lama tidak dapat ditampilkan karena hanya tersimpan sebagai hash. Pegawai wajib mengganti PIN sementara saat login pertama. PDF tidak disimpan ulang di server dan harus dibagikan secara pribadi.
 
+## Analitik kinerja per bagian
+
+Menu **Analitik** diringkas menjadi tiga bagian: **Umum**, **Medis**, dan **Sosial**
+(tab per bagian). Setiap bagian menampilkan *Completion Rate*, *Workflow
+Breakdown*, *Tren Produktivitas* (harian/mingguan/bulanan), dan *Indikator Kinerja
+& Standar Mutu* yang kini hanya berisi tiga indikator berbasis data laporan nyata:
+
+| Kode | Indikator | Realisasi |
+|---|---|---|
+| KPI-xx-01 | Laporan Kinerja Harian | staf yang mengisi laporan ÷ staf aktif unit |
+| KPI-xx-02 | Status Penyelesaian Laporan | laporan `Finish` ÷ seluruh laporan unit |
+| KPI-xx-03 | Ketepatan Tenggat Waktu | selesai ≤ tenggat (dan laporan belum selesai yang sudah lewat tenggat dihitung terlambat) |
+
+Standar mutu ketiga indikator: **95%** (dapat diubah lewat `ANALYTICS_INDICATOR_TARGET`
+di `backend/server.py`). Indikator tanpa data ditampilkan sebagai *Belum Ada Data*
+dan tidak menurunkan skor bagian (bobot dinormalisasi).
+
+Pemetaan sebagian: **Umum** = Umum, Admin, Bendahara, Perencanaan, Informasi dan
+Humas, Sarana & Prasarana; **Medis** = Layanan Rehabilitasi Medis; **Sosial** =
+Layanan Rehabilitasi Sosial. Departemen *Clinical Supervisor* tidak ditampilkan
+pada analitik (tetap ada di roster dan pengelolaan staf). Kunci `departments`
+pada `/api/analytics` tetap dikirim (9 departemen) untuk kompatibilitas, sedangkan
+UI memakai `sections`/`unit_groups`.
+
 ## Clustering akun & penyeragaman PIN
 
 `scripts/clustering.py` menyiapkan data akun untuk clustering peran (Staf, Ketua

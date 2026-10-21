@@ -673,3 +673,9 @@ nav{display:grid;gap:5px}
 [data-sonner-toast] button, [data-sonner-toast] a { pointer-events: auto; }
 .modal-backdrop { z-index: 40; }
 .change-pin-backdrop { z-index: 120; }
+
+/* Analitik per bagian: kartu unit dapat diklik */
+button.department-stat{font:inherit;width:100%;cursor:pointer;transition:box-shadow .15s ease,border-color .15s ease}
+button.department-stat:hover{border-color:#2563eb;box-shadow:0 0 0 2px #2563eb22}
+button.department-stat:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.analytics-cards{margin-top:16px}
