@@ -92,3 +92,6 @@ backend/data/*.json
 
 # Perkakas pratinjau lokal (kredensial/log runtime)
 .preview/
+
+# Daftar akun uji login (berisi PIN, jangan di-commit)
+Daftar-Akun-Uji.xlsx
