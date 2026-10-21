@@ -84,6 +84,27 @@ UI memakai `sections`/`unit_groups`.
 
 ## Clustering akun & penyeragaman PIN
 
+### Memperbarui roster staf dari berkas clustering
+
+Berkas "Isi Peran" yang sudah diperbarui dapat dipakai untuk **mengganti seluruh
+daftar staf resmi** tanpa mengubah kode:
+
+```bash
+# server pratinjau harus berjalan (endpoint /api/admin/clustering/sync-roster)
+python scripts/clustering.py sync Clustering-Akun-LokaKin.xlsx --dry-run   # pratinjau
+python scripts/clustering.py sync Clustering-Akun-LokaKin.xlsx             # terapkan
+```
+
+Alur di server: berkas dibaca (`.xlsx`/`.csv`, pemisah `;` atau `,`, pengodean
+Windows-1252/UTF-8) → peran diterjemahkan (Kepala Loka/Clinical Supervisor/Ketua
+Tim/Staf) → departemen dinormalisasi (mis. "Layanan Umum" → `Umum`) → roster
+resmi diimpor mode `replace` → seluruh akun roster diaktifkan dengan PIN seragam
+`123456`. **Akun Super Admin terpisah tidak pernah diubah.** Staf yang tidak ada
+pada berkas diarsipkan (bukan dihapus) agar riwayat laporan tetap terhubung, dan
+NIP/NIK yang bukan 16/18 digit disimpan kosong serta dilaporkan agar dibetulkan
+(akun tetap ada, hanya belum bisa login).
+
+
 `scripts/clustering.py` menyiapkan data akun untuk clustering peran (Staf, Ketua
 Tim, Clinical Supervisor, Kepala Loka, Super Admin) sekaligus menyeragamkan PIN
 pratinjau. Semua perintah membaca/menulis snapshot mode `local-json`

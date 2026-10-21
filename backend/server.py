@@ -1386,6 +1386,115 @@ async def rotate_credentials_and_download_pdf(user: Dict[str, Any] = Depends(req
     )
 
 
+@api.post("/admin/clustering/sync-roster")
+async def clustering_sync_roster(
+    request: Request,
+    file: UploadFile = File(...),
+    mode: str = Form("replace"),
+    pin: str = Form("123456"),
+    user: Dict[str, Any] = Depends(require_super_admin),
+):
+    """Perbarui roster staf dari berkas format clustering (Excel/CSV).
+
+    Alur: baca berkas 'Isi Peran' -> susun roster -> impor resmi (mode replace)
+    -> aktifkan ulang seluruh akun roster dengan PIN seragam. Akun Super Admin
+    terpisah tidak pernah diubah.
+    """
+    from roster_template import TemplateError, build_roster_rows, load_template_bytes
+
+    if not (len(str(pin)) == 6 and str(pin).isdigit()):
+        raise HTTPException(400, "PIN harus 6 digit angka.")
+    if mode not in {"replace", "merge"}:
+        raise HTTPException(400, "Mode harus 'replace' atau 'merge'.")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(400, "Berkas kosong.")
+    try:
+        entries, meta = load_template_bytes(file.filename or "unggahan.csv", payload)
+    except TemplateError as exc:
+        raise HTTPException(400, str(exc))
+
+    rows, warnings, invalid_nip = build_roster_rows(entries)
+    import_rows = [
+        StaffImportRow(
+            name=row["name"],
+            bagian=row.get("bagian", ""),
+            nip=row.get("nip", ""),
+            department=row.get("department", ""),
+            role=row.get("role") or None,
+            supervised_departments=row.get("supervised_departments") or [],
+        )
+        for row in rows
+    ]
+    import_result = await import_staff(
+        StaffImportRequest(rows=import_rows, mode=mode, source=f"format clustering: {file.filename}"),
+        user=user,
+    )
+
+    # Aktifkan ulang seluruh akun roster dengan PIN seragam (Super Admin terpisah dilewati).
+    # Sesi lain dicabut agar PIN lama tidak lagi berlaku; sesi pelaku tetap hidup.
+    keep_token = request_session_token(request)
+    keep_hash = hash_session_token(keep_token) if keep_token else ""
+    activated = 0
+    async for record in db.staff.find({"system_super_admin": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0, "id": 1}):
+        await db.staff.update_one(
+            {"id": record["id"]},
+            {"$set": {
+                "pin_hash": hash_credential(pin),
+                "is_activated": True,
+                "pin_change_required": False,
+                "activation_code_hash": "",
+                "activation_code_expires_at": "",
+                "activation_code_attempts": 0,
+                "activation_code_locked_until": "",
+                "login_failed_attempts": 0,
+                "login_locked_until": "",
+                "pin_source": "roster-sync",
+                "pin_updated_at": iso_utc(utc_now()),
+            }},
+        )
+        activated += 1
+
+    if keep_hash:
+        await db.auth_sessions.delete_many({"token_hash": {"$ne": keep_hash}})
+    else:
+        await db.auth_sessions.delete_many({})
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "event": "clustering_roster_synced",
+        "actor_id": user["id"],
+        "file": file.filename,
+        "mode": mode,
+        "imported": import_result.get("imported"),
+        "activated": activated,
+        "created_at": iso_utc(utc_now()),
+    })
+
+    roster_now = await db.staff.find({"active": {"$ne": False}}, {"_id": 0, "role": 1, "system_super_admin": 1}).to_list(5000)
+    role_counts: Dict[str, int] = {}
+    for record in roster_now:
+        role = "super_admin" if record.get("system_super_admin") else (record.get("role") or "staff")
+        role_counts[role] = role_counts.get(role, 0) + 1
+
+    return {
+        "ok": True,
+        "imported": import_result.get("imported"),
+        "skipped": import_result.get("skipped"),
+        "total_roster": import_result.get("total_roster"),
+        "activated": activated,
+        "pin": pin,
+        "role_counts": role_counts,
+        "warnings": warnings[:50],
+        "warning_count": len(warnings),
+        "invalid_nip": invalid_nip,
+        "super_admin_kept": bool(await db.staff.find_one({"system_super_admin": True}, {"_id": 0, "id": 1})),
+        "super_admin_block": meta.get("super_admin"),
+        "source": import_result.get("source"),
+    }
+
+
 @api.get("/admin/clustering/summary")
 async def clustering_summary(user: Dict[str, Any] = Depends(require_super_admin)):
     """Ringkasan cluster peran x departemen untuk ditampilkan di aplikasi."""
@@ -2463,7 +2572,11 @@ async def analytics(user: Dict[str, Any] = Depends(get_current_user)):
     percentages = percentage_split(counts)
 
     staff_query = {} if is_report_manager(user) else {"id": user["id"]}
-    staff_rows = await db.staff.find(staff_query, {"_id": 0}).to_list(500)
+    staff_rows = [
+        row for row in await db.staff.find(staff_query, {"_id": 0}).to_list(500)
+        # Staf arsip/nonaktif dan akun sistem Super Admin tidak dihitung di analitik.
+        if row.get("active", True) and not row.get("archived") and not row.get("system_super_admin")
+    ]
 
     sections = [compute_section_metrics(tasks, staff_rows, section) for section in ANALYTICS_SECTIONS]
 

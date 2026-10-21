@@ -82,7 +82,12 @@ def roster_rows(staff: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Akun roster (78 staf), tanpa akun sistem Super Admin terpisah."""
     rows = [
         row for row in staff
-        if row.get("id") and not row.get("system_super_admin") and row.get("id") != SEPARATE_SUPER_ADMIN_ID
+        if row.get("id")
+        and not row.get("system_super_admin")
+        and row.get("id") != SEPARATE_SUPER_ADMIN_ID
+        # Staf yang sudah diarsipkan/dinonaktifkan tidak ikut format clustering.
+        and row.get("active", True)
+        and not row.get("archived")
     ]
     return sort_staff(rows)
 

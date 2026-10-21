@@ -200,6 +200,105 @@ def print_report(store: Snapshot) -> None:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def run_sync(args) -> int:
+    """Kirim berkas clustering ke API untuk memperbarui roster resmi + PIN seragam."""
+    import urllib.error
+    import urllib.request
+    import uuid
+
+    from roster_template import build_roster_rows, load_template_bytes
+
+    path = Path(args.path)
+    if not path.is_file():
+        raise SystemExit(f"Berkas tidak ditemukan: {path}")
+    entries, meta = load_template_bytes(path.name, path.read_bytes())
+    rows, warnings, invalid_nip = build_roster_rows(entries)
+
+    print(f"Berkas          : {path.name}")
+    print(f"Akun terbaca    : {len(entries)}")
+    print(f"Roster siap     : {len(rows)} baris")
+    from collections import Counter
+    print(f"Peran           : {dict(Counter(row['role'] for row in rows))}")
+    print(f"Departemen      : {dict(Counter(row['department'] for row in rows))}")
+    if invalid_nip:
+        print(f"NIP tidak valid : {len(invalid_nip)}")
+        for item in invalid_nip:
+            print(f"  - {item['name']}: {item['nip']}")
+    if warnings:
+        print("Peringatan      :")
+        for warning in warnings[:10]:
+            print(f"  - {warning}")
+    if args.dry_run:
+        print("\n[dry-run] berkas tidak dikirim.")
+        return 0
+
+    # 1) Login sebagai Super Admin.
+    api = args.api.rstrip("/")
+    login_body = json.dumps({"nip": normalize_digits(args.nip), "pin": args.admin_pin}).encode()
+    login_req = urllib.request.Request(f"{api}/api/auth/login", data=login_body, method="POST",
+                                       headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(login_req, timeout=20) as response:
+            login = json.loads(response.read().decode())
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(f"Gagal masuk sebagai Super Admin ({exc.code}): {exc.read().decode()[:200]}")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"API tidak dapat dihubungi di {api}: {exc.reason}")
+
+    token = login.get("session_token") or ""
+    if not token:
+        raise SystemExit("Login berhasil tetapi server tidak mengembalikan token sesi. "
+                         "Jalankan server pratinjau dengan AUTH_PREVIEW_TOKEN_FALLBACK=true.")
+
+    # 2) Kirim berkas ke endpoint sinkronisasi roster.
+    boundary = f"----lokakin{uuid.uuid4().hex}"
+    parts: List[bytes] = []
+    for key, value in (("mode", args.mode), ("pin", args.pin)):
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
+        )
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
+        f'Content-Type: application/octet-stream\r\n\r\n'.encode() + path.read_bytes() + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(parts)
+
+    request = urllib.request.Request(
+        f"{api}/api/admin/clustering/sync-roster",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode()
+        try:
+            detail = json.loads(detail).get("detail") or detail
+        except json.JSONDecodeError:
+            pass
+        raise SystemExit(f"Sinkronisasi gagal ({exc.code}): {detail}")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"API tidak dapat dihubungi: {exc.reason}")
+
+    print("\n== Hasil sinkronisasi ==")
+    print(f"  Roster diimpor : {result.get('imported')} akun (dilewati {result.get('skipped')})")
+    print(f"  Total roster   : {result.get('total_roster')}")
+    print(f"  Akun aktif+PIN : {result.get('activated')} akun dengan PIN {result.get('pin')}")
+    print(f"  Sebaran peran  : {result.get('role_counts')}")
+    print(f"  Super Admin    : {'dipertahankan' if result.get('super_admin_kept') else 'TIDAK DITEMUKAN'}")
+    if result.get("warning_count"):
+        print(f"  Peringatan     : {result['warning_count']}")
+        for warning in result.get("warnings", [])[:10]:
+            print(f"    - {warning}")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Clustering akun LOKA-Kin")
     parser.add_argument("--data-file", type=Path, default=DATA_FILE,
@@ -223,6 +322,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app.add_argument("--keep-sessions", action="store_true", help="jangan cabut sesi login yang ada")
     app.add_argument("--no-backup", action="store_true", help="lewati pencadangan snapshot")
 
+    sync = sub.add_parser("sync", help="perbarui roster staf dari berkas clustering (via API)")
+    sync.add_argument("path", type=Path, help="berkas Excel/CSV format clustering ('Isi Peran')")
+    sync.add_argument("--api", default="http://127.0.0.1:8000", help="alamat API (default http://127.0.0.1:8000)")
+    sync.add_argument("--nip", default=os.environ.get("LOKA_ADMIN_NIP", "0000000000000001"),
+                      help="NIP/NIK Super Admin untuk masuk (default Super Admin terpisah)")
+    sync.add_argument("--admin-pin", default=os.environ.get("LOKA_ADMIN_PIN", DEFAULT_PIN),
+                      help=f"PIN Super Admin (default {DEFAULT_PIN})")
+    sync.add_argument("--mode", choices=["replace", "merge"], default="replace",
+                      help="replace = ganti seluruh roster resmi (default), merge = tambah")
+    sync.add_argument("--pin", default=DEFAULT_PIN, help=f"PIN seragam untuk semua akun (default {DEFAULT_PIN})")
+    sync.add_argument("--dry-run", action="store_true", help="baca berkas & tampilkan ringkasan tanpa mengirim")
+
     sub.add_parser("report", help="tampilkan matriks cluster dari database")
 
     args = parser.parse_args(argv)
@@ -237,6 +348,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "report":
         print_report(store)
         return 0
+
+    if args.command == "sync":
+        return run_sync(args)
 
     if args.command == "pin":
         plan = apply_pin(store, args.pin, revoke_sessions=not args.keep_sessions)
