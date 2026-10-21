@@ -2,7 +2,7 @@
 
 PIN seragam seluruh akun: **123456**. Login memakai NIP/NIK 16–18 digit.
 
-Total akun roster: **81** · belum punya NIP/NIK: **1**
+Total akun roster: **81** · belum punya NIP/NIK: **0**
 
 
 ## 1. Tabel peran (isi 1 pada satu kolom peran per baris)
@@ -47,7 +47,7 @@ Total akun roster: **81** · belum punya NIP/NIK: **1**
 | 36 | staff-35 | Eka Rahma Saputri | 1801064911980010 | Umum | Staf |  |  |  |  | 1 | — |
 | 37 | staff-36 | Indra Gunawan | 198809152025211000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
 | 38 | staff-37 | Amelia, A.Md.Kep | 199805032025212000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
-| 39 | staff-38 | Adams Resmitha Thalib, SE | _(kosong)_ | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
+| 39 | staff-38 | Adams Resmitha Thalib, SE | 198305192025211000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
 | 40 | staff-39 | Arisman | 198804112025211000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
 | 41 | staff-40 | Rizal, S.Psi | 199510122025211000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
 | 42 | staff-41 | Yoga Eko Budiyanto | 199412292025211000 | Layanan Rehabilitasi Sosial | Staf |  |  |  |  | 1 | — |
