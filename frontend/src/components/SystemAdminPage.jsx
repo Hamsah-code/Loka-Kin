@@ -121,6 +121,9 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
         saveBlob(response.data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           `Clustering-Akun-LokaKin-${today}.xlsx`);
         toast.success("Template Excel terunduh. Isi kolom peran lalu jalankan apply.");
+      } else if (kind === "pdf") {
+        saveBlob(response.data, "application/pdf", `Clustering-Akun-LokaKin-${today}.pdf`);
+        toast.success("PDF terunduh dan siap dicetak.");
       } else {
         saveBlob(response.data, "text/csv;charset=utf-8", `Clustering-Akun-LokaKin-${today}.csv`);
         toast.success("CSV terunduh (satu kolom per peran).");
@@ -382,7 +385,19 @@ export default function SystemAdminPage({ settings, onSaveSettings }) {
 
           <div className="system-admin-download-row">
             <div>
-              <b>Tampilan cetak / PDF</b>
+              <b>PDF siap cetak</b>
+              <span>Unduhan langsung (A4 lanskap) berisi seluruh akun dan matriks cluster.</span>
+            </div>
+            <button type="button" className="secondary-btn" data-testid="download-clustering-pdf"
+              disabled={clusterBusy === "pdf"} onClick={() => downloadClustering("pdf")}>
+              {clusterBusy === "pdf" ? <LoaderCircle className="spinning" size={17} /> : <Download size={17} />}
+              {clusterBusy === "pdf" ? "Menyiapkan…" : "Unduh PDF"}
+            </button>
+          </div>
+
+          <div className="system-admin-download-row">
+            <div>
+              <b>Tampilan cetak / HTML</b>
               <span>Halaman A4 lanskap berisi seluruh akun dan matriks cluster; simpan sebagai PDF lewat dialog cetak.</span>
             </div>
             <button type="button" className="secondary-btn" data-testid="print-clustering"

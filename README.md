@@ -81,10 +81,12 @@ python scripts/clustering.py report
 
 Format yang sama juga dapat diunduh langsung dari aplikasi tanpa terminal: masuk
 sebagai Super Admin lalu buka **Pengaturan website → Clustering akun**. Tombol
-*Unduh Excel*, *Unduh CSV*, dan *Cetak / PDF* memakai endpoint terproteksi
-`/api/admin/clustering/{summary,template.xlsx,template.csv,template.html}`
-sehingga isinya selalu mengikuti data akun terbaru. Halaman cetak memakai tata
-letak A4 lanskap dan dapat disimpan sebagai PDF dari dialog cetak peramban.
+Tombol *Unduh Excel*, *Unduh CSV*, *Unduh PDF*, dan *Cetak / HTML* memakai
+endpoint terproteksi
+`/api/admin/clustering/{summary,template.xlsx,template.csv,template.pdf,template.html}`
+sehingga isinya selalu mengikuti data akun terbaru. PDF dan halaman cetak
+memakai tata letak A4 lanskap (akun + matriks cluster); halaman HTML dapat
+disimpan sebagai PDF dari dialog cetak peramban.
 
 Berkas Excel berisi empat sheet: **Isi Peran** (satu kolom per peran, diisi angka
 `1`; kolom peran sudah terisi otomatis dari database), **Snapshot Database**,

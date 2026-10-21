@@ -496,6 +496,135 @@ Kolom peran di atas tercetak sebagai informasi peran yang tersimpan saat ini.</p
 </body></html>"""
 
 
+def build_pdf(staff: Sequence[Dict[str, Any]], pin: str = DEFAULT_PIN,
+              title: str = "Format Clustering Akun LOKA-Kin") -> bytes:
+    """PDF A4 lanskap berisi tabel akun + matriks cluster (siap dicetak)."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    entries = account_rows(staff)
+    summary = summarize(staff)
+    separate = separate_super_admin(staff)
+
+    buffer = io.BytesIO()
+    page_width, page_height = landscape(A4)
+    margin = 10 * mm
+    doc = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=12 * mm,
+        title=title, author="LOKA-Kin",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Judul", parent=styles["Title"], fontName="Helvetica-Bold",
+                                 fontSize=15, leading=18, alignment=TA_LEFT,
+                                 textColor=colors.HexColor("#1F3864"), spaceAfter=2)
+    meta_style = ParagraphStyle("Meta", parent=styles["Normal"], fontName="Helvetica",
+                                fontSize=7.5, leading=10, textColor=colors.HexColor("#475569"))
+    cell_style = ParagraphStyle("Sel", parent=styles["Normal"], fontName="Helvetica",
+                                fontSize=6.4, leading=7.6)
+    head_style = ParagraphStyle("Kepala", parent=cell_style, fontName="Helvetica-Bold",
+                                textColor=colors.white, alignment=1)
+
+    story: List[Any] = [
+        Paragraph(escape(title), title_style),
+        Paragraph(
+            f"Dicetak {escape(_now_text())} &middot; PIN seragam <b>{escape(pin)}</b> &middot; "
+            f"{summary['roster_total']} akun roster &middot; {summary['missing_identity']} akun belum punya NIP/NIK",
+            meta_style,
+        ),
+        Spacer(1, 5 * mm),
+    ]
+
+    header = ["No", "ID Akun", "Nama Lengkap", "NIP/NIK", "Departemen", "Peran Saat Ini",
+              *[label for _code, label in ROLES], "Departemen Diawasi"]
+    data: List[List[Any]] = [[Paragraph(escape(h), head_style) for h in header]]
+    for entry in entries:
+        data.append([
+            Paragraph(str(entry["no"]), cell_style),
+            Paragraph(escape(str(entry["id"] or "")), cell_style),
+            Paragraph(escape(entry["name"]), cell_style),
+            Paragraph(escape(entry["nip"] or "—"), cell_style),
+            Paragraph(escape(entry["department"]), cell_style),
+            Paragraph(escape(entry["current_label"]), cell_style),
+            *[Paragraph("1" if code == entry["role_code"] else "", cell_style) for code, _label in ROLES],
+            Paragraph(escape(entry["supervised"] or "—"), cell_style),
+        ])
+
+    available = page_width - 2 * margin
+    ratios = [0.035, 0.075, 0.20, 0.115, 0.155, 0.09, 0.06, 0.065, 0.085, 0.055, 0.04, 0.125]
+    widths = [available * ratio for ratio in ratios]
+    table = Table(data, colWidths=widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F3864")),
+        ("BACKGROUND", (6, 0), (10, 0), colors.HexColor("#2E75B6")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B4C6E7")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 1), (1, -1), "CENTER"),
+        ("ALIGN", (6, 1), (10, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F9FF")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(table)
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Matriks Cluster: Departemen &times; Peran", title_style))
+    matrix_head = ["Departemen", *[label for _code, label in ROLES], "Total"]
+    matrix_data: List[List[Any]] = [[Paragraph(escape(h), head_style) for h in matrix_head]]
+    for department in summary["departments"]:
+        cells = [Paragraph(escape(department), cell_style)]
+        cells += [Paragraph(str(summary["matrix"][department].get(code, 0)), cell_style) for code, _l in ROLES]
+        cells.append(Paragraph(str(summary["row_totals"].get(department, 0)), cell_style))
+        matrix_data.append(cells)
+    totals_row = [Paragraph("<b>TOTAL</b>", cell_style)]
+    totals_row += [Paragraph(f"<b>{summary['role_counts'].get(code, 0)}</b>", cell_style) for code, _l in ROLES]
+    totals_row.append(Paragraph(f"<b>{summary['roster_total']}</b>", cell_style))
+    matrix_data.append(totals_row)
+
+    matrix = Table(matrix_data, colWidths=[available * 0.26] + [available * 0.11] * len(ROLES) + [available * 0.08],
+                   repeatRows=1)
+    matrix.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2E75B6")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B4C6E7")),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F6F9FF")]),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#E8F0FF")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(matrix)
+
+    if separate:
+        story.append(Spacer(1, 5 * mm))
+        story.append(Paragraph("Akun Super Admin Terpisah (di luar 78 akun)", title_style))
+        sa = Table([
+            [Paragraph(escape(str(separate.get("name") or "")), cell_style),
+             Paragraph(escape(normalize_digits(separate.get("nip")) or "—"), cell_style),
+             Paragraph(escape(pin), cell_style)],
+        ], colWidths=[available * 0.4, available * 0.3, available * 0.15])
+        sa.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#B4C6E7")),
+                                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#B4C6E7"))]))
+        story.append(sa)
+
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        "Isi angka 1 pada satu kolom peran di berkas Excel (menu Super Admin &rarr; Clustering akun) lalu jalankan "
+        "<i>clustering.py apply</i> untuk menerapkan peran dan PIN seragam. PIN 123456 hanya untuk "
+        "keperluan clustering/pelatihan.",
+        meta_style,
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def _now_text() -> str:
     from datetime import datetime, timezone, timedelta
 

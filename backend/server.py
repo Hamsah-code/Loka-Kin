@@ -1435,6 +1435,24 @@ async def clustering_template_csv(user: Dict[str, Any] = Depends(require_super_a
     )
 
 
+@api.get("/admin/clustering/template.pdf")
+async def clustering_template_pdf(user: Dict[str, Any] = Depends(require_super_admin)):
+    """PDF A4 lanskap (akun + matriks cluster) agar dapat langsung diunduh/dicetak."""
+    from clustering_export import DEFAULT_PIN, build_pdf
+
+    records = await db.staff.find({}, {"_id": 0}).to_list(5000)
+    stamp = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d")
+    return StreamingResponse(
+        io.BytesIO(build_pdf(records, pin=DEFAULT_PIN)),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="Clustering-Akun-LokaKin-{stamp}.pdf"',
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @api.get("/admin/clustering/template.html")
 async def clustering_template_html(user: Dict[str, Any] = Depends(require_super_admin)):
     """Tampilan siap cetak (A4 lanskap) sebagai alternatif PDF/Excel."""
