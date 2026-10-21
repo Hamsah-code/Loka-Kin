@@ -1,0 +1,79 @@
+﻿No,ID Akun,Nama Lengkap,NIP/NIK,Departemen,Peran Saat Ini,Super Admin,Kepala Loka,Clinical Supervisor,Ketua Tim,Staf,Departemen Diawasi,Catatan
+1,staff-1,"Edwin, S.Sos",1801010101010001,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,
+2,staff-2,"Nurma Fitria, S.IP, M.IKom",198611232010012008,Umum,Staf,0,0,0,0,1,,
+3,staff-3,dr. Heni Purwanti,197501012005012003,Layanan Rehabilitasi Medis,Ketua Tim,0,0,0,1,0,Layanan Rehabilitasi Medis,
+4,staff-4,"Saiful Bahri, A.Md.Kep",,Sarana & Prasarana,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+5,staff-5,"Okta Delvianita, AMKL, SE.",,Bendahara,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+6,staff-6,"Ns. Hamsah Prihadi Istianto, S.Kep",,Clinical Supervisor,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+7,staff-7,dr. Utari Gita Mutiara,,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+8,staff-8,"Yulina Destiani, A.Md.Kep",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+9,staff-9,"Daniel, A.Md.Kep",197804122006041005,Admin,Staf,0,0,0,0,1,,
+10,staff-10,"Yoga Adi Yuliawan, A.Md.Kes",,Admin,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+11,staff-11,"Evi Soleha, A.Md.AK",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+12,staff-12,"Nanda Alif Utama, A.Md.RAD",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+13,staff-13,"Risma Sefridasari, A.Md.KG",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+14,staff-14,"Tri Yunita, A.Md.Keb",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+15,staff-15,"Dendi Purnama, S.Kep, Ns",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+16,staff-16,"Randy Simanjutak, A.Md.Gz",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+17,staff-17,"Ikke Asmawati, A.Md.KL",,Perencanaan,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+18,staff-18,dr. Resti Adystia,,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+19,staff-19,"Karunia Hadpha Saputri, A.Md.Keb",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+20,staff-20,"Wiria Ahaddillah, S.Kep, Ners",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+21,staff-21,"Heby Segapa, A.Md.Farm",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+22,staff-22,"Febri Ardiyansyah, AMF",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+23,staff-23,"Anggi Oktaria, A.Md.Ft",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+24,staff-24,"Pika Junetthy BR Pinem, A.Md.Gz",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+25,staff-25,"Galuh Dwi Satria Vianto, A.Md.Kep",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+26,staff-26,"Yessy Lisnawati, SE",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+27,staff-27,"Yudian Pratama Putra, S.M",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+28,staff-28,"Restivo Nandami, A.Md",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+29,staff-29,Heti Liswati,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+30,staff-30,Riza Rimayanti,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+31,staff-31,Denda Nopriawan Putra,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+32,staff-32,"Ahmad Soleh, S.Kom",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+33,staff-33,"Amardin Fikri, A.Md",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+34,staff-34,"Evi Talia, A.Md",,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+35,staff-35,Eka Rahma Saputri,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+36,staff-36,Indra Gunawan,,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+37,staff-37,"Amelia, A.Md.Kep",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+38,staff-38,"Adams Resmitha Thalib, SE",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+39,staff-39,Arisman,,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+40,staff-40,"Rizal, S.Psi",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+41,staff-41,Yoga Eko Budiyanto,,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+42,staff-42,Raga Dwindo Pangestu,,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+43,staff-43,"Wendy Ramarten, S.Pd",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+44,staff-44,"Yoyon Saputra, S.Sos",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+45,staff-45,"Indra Ibnul Alhibi Ramadhani, A.Md.Pi",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+46,staff-46,"Emi Rosmiko Sari, A.Md.Kep",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+47,staff-47,"Saiful Hamdani, S.Psi",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+48,staff-48,M. Nur Hidayatullah,,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+49,staff-49,"Yusuf Arief Sena K, S.Psi",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+50,staff-50,"Suci Ramadani, AMKL",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+51,staff-51,"Nadia Maulidia, A.Md.RMIK",,Layanan Rehabilitasi Medis,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+52,staff-52,Nur Cholish,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+53,staff-53,Gunawan Adi Saputra,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+54,staff-54,Saipul Bahri,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+55,staff-55,Septila Damirza,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+56,staff-56,Ma'ruf Nufri Ismail,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+57,staff-57,Mukhsinin,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+58,staff-58,Andri Setiawan,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+59,staff-59,Agus Feriyanto,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+60,staff-60,M. Arif Prasetyo,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+61,staff-61,Agus Yahya,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+62,staff-62,Joko Santoso,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+63,staff-63,Dedi Irawan,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+64,staff-64,Faisal,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+65,staff-65,Samsun Efendi,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+66,staff-66,Sahrul,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+67,staff-67,Amrulloh,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+68,staff-68,Wardani,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+69,staff-69,Ridho Kurnia,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+70,staff-70,"Gading Ade Nata, A.Md.Pt",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+71,staff-71,Junaidi,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+72,staff-72,Ali Usman,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+73,staff-73,Alimun,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+74,staff-74,Rusli,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+75,staff-75,Solehah,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+76,staff-76,M. Yoga Pratama,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+77,staff-77,"Bagus Prasetio, A.Md.P",,Layanan Rehabilitasi Sosial,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
+78,staff-78,Umam Wijaya,,Umum,Staf,0,0,0,0,1,,NIP/NIK belum ada — wajib diisi agar akun dapat login.
