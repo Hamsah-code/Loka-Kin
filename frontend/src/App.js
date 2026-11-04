@@ -2524,7 +2524,7 @@ export default function App() {
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
           <tr><td><b>${pdfSigner.title}</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>${pdfSigner.name}</b>${pdfSigner.nip ? `<div style="font-size:10px;font-weight:normal;">${pdfSigner.idLabel}: ${pdfSigner.nip}</div>` : ""}</td><td><b>${targetStaff.name}</b><div style="font-size:10px;font-weight:normal;">${staffIdLabel(targetStaff)}: ${staffIdValue(targetStaff)}</div></td></tr>
+          <tr><td><b>${pdfSigner.name}</b></td><td><b>${targetStaff.name}</b></td></tr>
         </table>
       `;
     } else {
