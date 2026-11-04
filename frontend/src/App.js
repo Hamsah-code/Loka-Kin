@@ -139,7 +139,7 @@ const groupedSignature = (staffList, people) => {
 const teamLeadText = (staffList, person) => {
   const lead = teamLeadForGroup(staffList, signatureGroupOf(person));
   if (!lead) return "-";
-  return `${lead.name}${lead.nip ? ` · ${staffIdLabel(lead)} ${lead.nip}` : ""}`;
+  return `${lead.name}<div style="font-size:10px;font-weight:normal;color:#475569;">${staffIdLabel(lead)}: ${staffIdValue(lead)}</div>`;
 };
 
 const toDateTimeInput = (d = new Date()) => {
