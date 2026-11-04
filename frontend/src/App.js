@@ -2500,7 +2500,7 @@ export default function App() {
               <td></td>
             </tr>
             <tr>
-              <td style="font-weight:bold;color:#475569;">NIP/NIK Ketua Tim ${signatureGroupOf(targetStaff).label}</td>
+              <td style="font-weight:bold;color:#475569;">NIP/NIK</td>
               <td style="color:#1e293b;">: ${teamLeadNipText(staff, targetStaff).replace(/^[^:]*: /, "")}</td>
               <td></td>
               <td></td>
@@ -2583,7 +2583,7 @@ export default function App() {
                   ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}
                   <table style="border-collapse:collapse;font-size:10px;margin-top:3px;color:#475569;">
                     <tr><td style="font-weight:bold;padding-right:10px;">Nama Ketua Tim ${signatureGroupOf(s).label}</td><td>: ${teamLeadText(staff, s)}</td></tr>
-                    <tr><td style="font-weight:bold;padding-right:10px;">NIP/NIK Ketua Tim ${signatureGroupOf(s).label}</td><td>: ${teamLeadNipText(staff, s).replace(/^[^:]*: /, "")}</td></tr>
+                    <tr><td style="font-weight:bold;padding-right:10px;">NIP/NIK</td><td>: ${teamLeadNipText(staff, s).replace(/^[^:]*: /, "")}</td></tr>
                   </table>
                 </div>
               </div>
