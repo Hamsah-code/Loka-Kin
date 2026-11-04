@@ -10,6 +10,7 @@ import LandingPage from "@/components/LandingPage";
 import AuthModal from "@/components/AuthModal";
 import SystemAdminPage from "@/components/SystemAdminPage";
 import ChangePinModal from "@/components/ChangePinModal";
+import FinishCelebration from "@/components/FinishCelebration";
 import { clearPreviewSessionToken, getPreviewSessionToken, PREVIEW_SESSION_HINT, previewSessionState, previewTokenFallbackEnabled, withPreviewAuth } from "@/previewSession";
 
 const API = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : "/api";
@@ -1970,6 +1971,8 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [exportMode, setExportMode] = useState(null); // 'excel' | 'pdf' | null
   const [pdfPreview, setPdfPreview] = useState(null);
+  const [finishCelebration, setFinishCelebration] = useState(false);
+  const closeFinishCelebration = useCallback(() => setFinishCelebration(false), []);
   const [transitionModal, setTransitionModal] = useState(null);
   const [active, setActive] = useState("home");
   const [query, setQuery] = useState("");
@@ -2127,6 +2130,7 @@ export default function App() {
       }
       setModal(null);
       await load();
+      if (payloads[0]?.status === "finish") setFinishCelebration(true);
     } catch (err) {
       const msg = err.response?.data?.detail || "Gagal menyimpan laporan";
       toast.error(Array.isArray(msg) ? "Lengkapi data tugas terlebih dahulu" : msg);
@@ -2869,6 +2873,7 @@ export default function App() {
         />
       )}
       {pdfPreview && <PdfPreviewModal preview={pdfPreview} onClose={() => setPdfPreview(null)} />}
+      {finishCelebration && <FinishCelebration onClose={closeFinishCelebration} />}
       {activationResult && (
         <div className="modal-backdrop" data-testid="activation-code-dialog">
           <div className="modal activation-code-modal">
