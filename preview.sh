@@ -13,6 +13,10 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PREVIEW_PORT="${PREVIEW_PORT:-3000}"
 cd "$ROOT"
 
+# Keep preview accounts/reports in an ignored local snapshot instead of
+# modifying the tracked roster/data fixture.
+export LOKA_DATA_FILE="${LOKA_DATA_FILE:-$ROOT/.preview/loka_kin_db.json}"
+
 # --- Backend: virtualenv + dependensi ---------------------------------------
 if [ ! -d .venv ]; then
   python3 -m venv .venv
