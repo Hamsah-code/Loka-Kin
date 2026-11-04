@@ -28,8 +28,8 @@ if (previewTokenFallbackEnabled) {
   });
 }
 const columns = [
-  { key: "todo", label: "To Do List", color: "blue", hint: "Daftar rencana tugas yang akan dikerjakan" },
-  { key: "doing", label: "Doing", color: "amber", hint: "Sedang dikerjakan" },
+  { key: "todo", label: "To Do List", color: "red", hint: "Daftar rencana tugas yang akan dikerjakan" },
+  { key: "doing", label: "Doing", color: "yellow", hint: "Sedang dikerjakan" },
   { key: "finish", label: "Finish", color: "green", hint: "Sudah diselesaikan" },
 ];
 const departments = [
@@ -255,7 +255,7 @@ function TaskCard({ task, staff, onEdit, onTransition, canEdit = false }) {
       : (task.finish_at || task.status_updated_at);
 
   const statusLabel = statusLabelMap[normalizedStatus] || normalizedStatus;
-  const badgeColor = normalizedStatus === "todo" ? "blue" : normalizedStatus === "doing" ? "amber" : "green";
+  const badgeColor = normalizedStatus === "todo" ? "red" : normalizedStatus === "doing" ? "yellow" : "green";
 
   return (
     <div
@@ -1703,8 +1703,8 @@ function CompletionCard({ section }) {
           <p>Persentase laporan yang telah diselesaikan pada bagian {section?.short} dari total laporan aktif unit.</p>
           <ul>
             <li><span className="legend-dot green" /> Selesai · {percentages.finish || 0}%</li>
-            <li><span className="legend-dot amber" /> Sedang berjalan · {percentages.doing || 0}%</li>
-            <li><span className="legend-dot blue" /> To Do List · {percentages.todo ?? percentages.plan ?? 0}%</li>
+            <li><span className="legend-dot yellow" /> Sedang berjalan · {percentages.doing || 0}%</li>
+            <li><span className="legend-dot red" /> To Do List · {percentages.todo ?? percentages.plan ?? 0}%</li>
           </ul>
         </div>
       </div>
@@ -2651,7 +2651,7 @@ export default function App() {
       `;
     }
 
-    const fullHtml = `<html><head><meta charset="UTF-8"><title>LOKA-Kin - ${title}</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#0f172a;margin:0;padding:12px}h1{font-size:19px;margin:0 0 6px;color:#0f172a}.staff-header-card{background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:10px 14px;margin-bottom:14px}.staff-section{margin-bottom:20px;page-break-inside:avoid}.staff-banner{background:#e2e8f0;padding:7px 10px;font-size:11px;display:flex;justify-content:space-between;align-items:center;border:1px solid #cbd5e1;border-bottom:0;border-radius:4px 4px 0 0}.report-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10px}.report-table td,.report-table th{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;vertical-align:top;word-break:break-word}.report-table th{background:#e8f0ff;font-weight:700}.status-pill{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700}.status-todo{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}.status-doing{background:#fffbeb;color:#b45309;border:1px solid #fde68a}.status-finish{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}.photo-cell{text-align:center;padding:4px}.task-photo{max-width:100px;max-height:75px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1}.no-photo{color:#94a3b8;font-size:10px}.signature-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:40px;font-size:11px;page-break-inside:avoid}.signature-table td{border:0;width:50%;text-align:center;vertical-align:top;padding:4px 16px;line-height:1.25}.signature-table .signature-space td{height:80px;padding:0}</style></head><body><h1>LOKA-Kin · ${title}</h1>${contentHtml}${sigHtml}</body></html>`;
+    const fullHtml = `<html><head><meta charset="UTF-8"><title>LOKA-Kin - ${title}</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#0f172a;margin:0;padding:12px}h1{font-size:19px;margin:0 0 6px;color:#0f172a}.staff-header-card{background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:10px 14px;margin-bottom:14px}.staff-section{margin-bottom:20px;page-break-inside:avoid}.staff-banner{background:#e2e8f0;padding:7px 10px;font-size:11px;display:flex;justify-content:space-between;align-items:center;border:1px solid #cbd5e1;border-bottom:0;border-radius:4px 4px 0 0}.report-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10px}.report-table td,.report-table th{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;vertical-align:top;word-break:break-word}.report-table th{background:#e8f0ff;font-weight:700}.status-pill{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700}.status-todo{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}.status-doing{background:#fef9c3;color:#854d0e;border:1px solid #fde047}.status-finish{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}.photo-cell{text-align:center;padding:4px}.task-photo{max-width:100px;max-height:75px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1}.no-photo{color:#94a3b8;font-size:10px}.signature-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-top:40px;font-size:11px;page-break-inside:avoid}.signature-table td{border:0;width:50%;text-align:center;vertical-align:top;padding:4px 16px;line-height:1.25}.signature-table .signature-space td{height:80px;padding:0}</style></head><body><h1>LOKA-Kin · ${title}</h1>${contentHtml}${sigHtml}</body></html>`;
 
     const slug = isSingleStaff ? targetStaff.name.replace(/[^a-zA-Z0-9]/g, "_") : "per-staf";
     const filename = `loka-kin-${period}-${slug}-${toDateInput(start)}.html`;

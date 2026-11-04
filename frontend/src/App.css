@@ -72,6 +72,8 @@ nav{display:grid;gap:5px}
 .progress-track i{display:block;height:100%;border-radius:20px}
 .progress-track i.blue{background:#3b82f6}
 .progress-track i.amber{background:#f5ad26}
+.progress-track i.red{background:#dc2626}
+.progress-track i.yellow{background:#facc15}
 .progress-track i.green{background:#1ab978}
 .progress-row b{font-size:12px;text-align:right}
 .live-label{font-size:11px;color:#38a77b}
@@ -80,8 +82,8 @@ nav{display:grid;gap:5px}
 .recent-item strong{font-size:12px}
 .recent-item small{font-size:11px;color:var(--muted);margin-top:5px}
 .status-icon{width:25px;height:25px;border-radius:50%;display:grid;place-items:center}
-.status-icon.plan{color:#3975e7;background:#e7efff}
-.status-icon.doing{color:#ce8b12;background:#fff4d8}
+.status-icon.plan,.status-icon.todo{color:#dc2626;background:#fee2e2}
+.status-icon.doing{color:#a16207;background:#fef9c3}
 .status-icon.finish{color:#18a873;background:#e5f9f0}
 
 .toolbar{display:flex;align-items:center;gap:12px;margin-bottom:22px}
@@ -98,6 +100,8 @@ nav{display:grid;gap:5px}
 .column-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 .column-dot.blue{background:#3b82f6}
 .column-dot.amber{background:#f5ad26}
+.column-dot.red{background:#dc2626}
+.column-dot.yellow{background:#facc15}
 .column-dot.green{background:#1ab978}
 .add-column,.icon-button{border:1px solid var(--line);background:var(--surface);color:#7c8b9b;border-radius:6px;width:29px;height:29px;display:grid;place-items:center}
 .task-list{display:grid;gap:11px}
@@ -120,6 +124,8 @@ nav{display:grid;gap:5px}
 .status-time-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;padding:4px 8px;border-radius:5px;margin-bottom:12px}
 .status-time-badge.blue{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
 .status-time-badge.amber{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+.status-time-badge.red{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}
+.status-time-badge.yellow{background:#fef9c3;color:#854d0e;border:1px solid #fde047}
 .status-time-badge.green{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
 
 /* Disabled column add button with hint */
@@ -197,8 +203,8 @@ nav{display:grid;gap:5px}
 /* PDF In-App Preview Modal (No pop-up required) */
 .card-actions{display:flex;align-items:center;gap:6px;margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)}
 .card-action-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid transparent;cursor:pointer;transition:all .15s ease}
-.card-action-btn.doing{background:#fffbeb;color:#b45309;border-color:#fde68a}
-.card-action-btn.doing:hover{background:#fef3c7;border-color:#fcd34d}
+.card-action-btn.doing{background:#fef9c3;color:#854d0e;border-color:#fde047}
+.card-action-btn.doing:hover{background:#fef08a;border-color:#facc15}
 .card-action-btn.finish{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
 .card-action-btn.finish:hover{background:#dcfce7;border-color:#86efac}
 .card-action-btn.revert{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
@@ -224,7 +230,7 @@ nav{display:grid;gap:5px}
 
 .dark-mode .task-target-highlight{background:#132238;border-color:#253754}
 .dark-mode .task-target-highlight strong{color:#93c5fd}
-.dark-mode .card-action-btn.doing{background:#2a1c05;color:#fcd34d;border-color:#78490a}
+.dark-mode .card-action-btn.doing{background:#3d3207;color:#fde047;border-color:#a16207}
 .dark-mode .card-action-btn.finish{background:#092918;color:#86efac;border-color:#166534}
 .dark-mode .card-action-btn.revert{background:#172233;color:#94a3b8;border-color:#334561}
 .dark-mode .target-change-alert{background:#172847;border-color:#1d4ed8;color:#bfdbfe}
@@ -248,8 +254,8 @@ nav{display:grid;gap:5px}
 .pdf-paper .report-table td,.pdf-paper .report-table th{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;vertical-align:top;word-break:break-word}
 .pdf-paper .report-table th{background:#e8f0ff;font-weight:700;color:#0f172a}
 .pdf-paper .status-pill{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700}
-.pdf-paper .status-todo{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
-.pdf-paper .status-doing{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+.pdf-paper .status-todo{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}
+.pdf-paper .status-doing{background:#fef9c3;color:#854d0e;border:1px solid #fde047}
 .pdf-paper .status-finish{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
 .pdf-paper .photo-cell{text-align:center;padding:4px}
 .pdf-paper .task-photo{max-width:90px;max-height:70px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1}
@@ -341,6 +347,8 @@ nav{display:grid;gap:5px}
 .legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 .legend-dot.blue{background:#3b82f6}
 .legend-dot.amber{background:#f5ad26}
+.legend-dot.red{background:#dc2626}
+.legend-dot.yellow{background:#facc15}
 .legend-dot.green{background:#1ab978}
 
 .breakdown{min-height:280px}
@@ -446,8 +454,8 @@ nav{display:grid;gap:5px}
 .dark-mode .dept-icon{background:#1e3557;color:#8fb4ff}
 .dark-mode .export-btn{background:#20365a;color:#c6dcff}
 .dark-mode .secondary-btn{background:#22344c;color:#dbe7f5}
-.dark-mode .status-icon.plan{background:#1c3159;color:#96b8f4}
-.dark-mode .status-icon.doing{background:#3e2d0b;color:#f0c168}
+.dark-mode .status-icon.plan,.dark-mode .status-icon.todo{background:#3b1212;color:#fca5a5}
+.dark-mode .status-icon.doing{background:#3d3207;color:#fde047}
 .dark-mode .status-icon.finish{background:#123c2b;color:#5ee0a8}
 .dark-mode .priority.tinggi{background:#3c1a15;color:#f8a38c}
 .dark-mode .priority.sedang{background:#3a2b0d;color:#f2c66d}
@@ -461,6 +469,8 @@ nav{display:grid;gap:5px}
 .dark-mode .period-choice.active small{color:#c6dcff}
 .dark-mode .status-time-badge.blue{background:#172b48;color:#93c5fd;border-color:#2563eb}
 .dark-mode .status-time-badge.amber{background:#382405;color:#fcd34d;border-color:#b45309}
+.dark-mode .status-time-badge.red{background:#3b1212;color:#fca5a5;border-color:#b91c1c}
+.dark-mode .status-time-badge.yellow{background:#3d3207;color:#fde047;border-color:#a16207}
 .dark-mode .status-time-badge.green{background:#0e2e1c;color:#86efac;border-color:#16a34a}
 .dark-mode .status-time-section{background:#111e30;border-color:#283a54}
 .dark-mode .status-notice{background:#152945;border-color:#2563eb;color:#bfdbfe}
