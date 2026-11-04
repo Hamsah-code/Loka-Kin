@@ -31,6 +31,11 @@ fi
 # frontend too, so port 8000 never serves a production bundle without the flag.
 ( cd frontend && REACT_APP_PREVIEW_TOKEN_FALLBACK=true yarn build )
 
+# --- Roster pratinjau dari berkas sumber clustering ------------------------
+# Snapshot backend/data/loka_kin_db.json tidak masuk Git. Skrip ini membangunnya
+# ulang dari Clustering-Akun-LokaKin_Isi-Peran.csv (idempotent, PIN 123456).
+.venv/bin/python scripts/setup_preview_roster.py
+
 # --- Backend (http://0.0.0.0:8000) -----------------------------------------
 # Pakai wrapper preview agar cookie sesi bekerja di iframe dengan CHIPS:
 # SameSite=None; Secure; Partitioned. PREVIEW_PORT backend dikunci 8000;
