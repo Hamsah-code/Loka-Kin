@@ -2264,6 +2264,7 @@ export default function App() {
       setTransitionModal(null);
       await load();
       toast.success(`Status berhasil diubah ke ${statusLabelMap[nextStatus] || nextStatus} dengan target riil terbaru.`);
+      if (nextStatus === "finish") setFinishCelebration(true);
     } catch (err) {
       const msg = err.response?.data?.detail || "Gagal menyimpan perubahan status dan target riil";
       toast.error(msg);
