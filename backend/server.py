@@ -28,7 +28,9 @@ from pdf_import import extract_rows
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-DATA_FILE = ROOT_DIR / "data" / "loka_kin_db.json"
+# Allow isolated persistent data for local previews/tests without modifying the
+# tracked roster snapshot. Production MongoDB ignores this setting.
+DATA_FILE = Path(os.environ.get("LOKA_DATA_FILE", str(ROOT_DIR / "data" / "loka_kin_db.json"))).expanduser()
 mongo_url = os.environ.get("MONGO_URL", "")
 db, client, DB_MODE = create_database(mongo_url, os.environ.get("DB_NAME", "loka_kin"), DATA_FILE)
 app = FastAPI(title="LOKA-Kin API")
