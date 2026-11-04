@@ -138,8 +138,12 @@ const groupedSignature = (staffList, people) => {
 /** Teks Ketua Tim cluster seseorang untuk blok staf PDF: nama + NIP/NIK. */
 const teamLeadText = (staffList, person) => {
   const lead = teamLeadForGroup(staffList, signatureGroupOf(person));
-  if (!lead) return "-";
-  return `${lead.name}<div style="font-size:10px;font-weight:normal;color:#475569;">${staffIdLabel(lead)}: ${staffIdValue(lead)}</div>`;
+  return lead?.name || "-";
+};
+
+const teamLeadNipText = (staffList, person) => {
+  const lead = teamLeadForGroup(staffList, signatureGroupOf(person));
+  return lead ? `${staffIdLabel(lead)}: ${staffIdValue(lead)}` : "-";
 };
 
 const toDateTimeInput = (d = new Date()) => {
@@ -2495,6 +2499,12 @@ export default function App() {
               <td style="font-weight:bold;color:#475569;"></td>
               <td></td>
             </tr>
+            <tr>
+              <td style="font-weight:bold;color:#475569;">NIP/NIK Ketua Tim ${signatureGroupOf(targetStaff).label}</td>
+              <td style="color:#1e293b;">: ${teamLeadNipText(staff, targetStaff).replace(/^[^:]*: /, "")}</td>
+              <td></td>
+              <td></td>
+            </tr>
           </table>
         </div>
         <table class="report-table">
@@ -2570,7 +2580,11 @@ export default function App() {
               <div>
                 <strong><span style="color:#475569;font-weight:normal;">Nama Staf:</span> ${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
                 <div style="font-weight:normal;font-size:10px;color:#475569;margin-top:2px;">
-                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;·&nbsp; Ketua Tim ${signatureGroupOf(s).label}: ${teamLeadText(staff, s)}
+                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}
+                  <table style="border-collapse:collapse;font-size:10px;margin-top:3px;color:#475569;">
+                    <tr><td style="font-weight:bold;padding-right:10px;">Nama Ketua Tim ${signatureGroupOf(s).label}</td><td>: ${teamLeadText(staff, s)}</td></tr>
+                    <tr><td style="font-weight:bold;padding-right:10px;">NIP/NIK Ketua Tim ${signatureGroupOf(s).label}</td><td>: ${teamLeadNipText(staff, s).replace(/^[^:]*: /, "")}</td></tr>
+                  </table>
                 </div>
               </div>
               <div style="font-size:10px;font-weight:600;color:#1e3d75;">
