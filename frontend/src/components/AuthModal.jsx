@@ -12,7 +12,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
   const [generatedCode, setGeneratedCode] = useState(null);
   const [rosterRows, setRosterRows] = useState([]);
   const [rosterBusy, setRosterBusy] = useState(false);
-  const [form, setForm] = useState({ name: "", nip: "", pin: "", pin_confirmation: "", activation_code: "", setup_secret: "" });
+  const [form, setForm] = useState({ name: "", nip: "", pin: "", new_pin: "", pin_confirmation: "", activation_code: "", setup_secret: "" });
 
   const change = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
   const setMode = (next) => {
@@ -71,6 +71,18 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
         onAuthenticated(response.data.user);
         return;
       }
+      if (mode === "change-pin") {
+        const response = await axios.post(`${API}/auth/self-change-pin`, {
+          nip: form.nip,
+          current_pin: form.pin,
+          new_pin: form.new_pin,
+          pin_confirmation: form.pin_confirmation,
+        }, { withCredentials: true });
+        setForm((current) => ({ ...current, pin: "", new_pin: "", pin_confirmation: "" }));
+        toast.success(response.data.message || "PIN berhasil diganti.");
+        onModeChange("login");
+        return;
+      }
       if (mode === "activate") {
         await axios.post(`${API}/auth/activate`, {
           nip: form.nip,
@@ -110,13 +122,17 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
 
   const title = mode === "login"
     ? "Selamat datang kembali"
-    : mode === "activate"
+    : mode === "change-pin"
+      ? "Ganti PIN"
+      : mode === "activate"
       ? "Aktifkan akun"
       : mode === "bootstrap-super-admin"
         ? "Penyiapan Super Admin pertama"
         : "Penyiapan Admin pertama";
   const subtitle = mode === "login"
     ? "Masuk dengan NIP/NIK dan PIN pribadi Anda."
+    : mode === "change-pin"
+      ? "Masukkan NIP/NIK, PIN lama, lalu PIN baru enam digit."
     : mode === "activate"
       ? "Masukkan kode sekali pakai, lalu buat PIN enam digit."
       : mode === "bootstrap-super-admin"
@@ -161,6 +177,20 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
                 <span><KeyRound size={14} /> PIN 6 digit</span>
                 <input name="pin" value={form.pin} onChange={change} type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="current-password" placeholder="••••••" required />
               </label>
+            )}
+
+            {mode === "change-pin" && (
+              <>
+                <label>
+                  <span><KeyRound size={14} /> PIN lama</span>
+                  <input name="pin" value={form.pin} onChange={change} type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="current-password" placeholder="••••••" required />
+                </label>
+                <div className="auth-pin-grid">
+                  <label><span>PIN baru</span><input name="new_pin" value={form.new_pin} onChange={change} type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="new-password" placeholder="6 angka" required /></label>
+                  <label><span>Ulangi PIN baru</span><input name="pin_confirmation" value={form.pin_confirmation} onChange={change} type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="new-password" placeholder="6 angka" required /></label>
+                </div>
+                <p className="auth-hint">Setelah PIN diganti, semua sesi masuk lama akan diakhiri. Jangan gunakan PIN yang mudah ditebak.</p>
+              </>
             )}
 
             {mode === "activate" && (
@@ -213,7 +243,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
             )}
 
             <button className="auth-primary" type="submit" disabled={busy || (mode === "bootstrap" && rosterBusy)}>
-              {busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "activate" ? "Buat PIN dan aktifkan" : mode === "bootstrap-super-admin" ? "Daftarkan Super Admin" : "Terbitkan kode aktivasi"}
+              {busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "change-pin" ? "Simpan PIN baru" : mode === "activate" ? "Buat PIN dan aktifkan" : mode === "bootstrap-super-admin" ? "Daftarkan Super Admin" : "Terbitkan kode aktivasi"}
             </button>
           </form>
         )}
@@ -222,6 +252,7 @@ export default function AuthModal({ mode = "login", onModeChange, onClose, onAut
           <div className="auth-mode-links">
             {mode !== "login" && <button type="button" className="auth-link" onClick={() => setMode("login")}><ArrowLeft size={14} /> Kembali ke Masuk</button>}
             {mode === "login" && <>
+              <button type="button" className="auth-link" onClick={() => setMode("change-pin")}>Ganti PIN</button>
               <button type="button" className="auth-link" onClick={() => setMode("activate")}>Aktivasi akun / lupa PIN</button>
               <button type="button" className="auth-link" onClick={() => setMode("bootstrap-super-admin")}>Penyiapan Super Admin pertama</button>
             </>}

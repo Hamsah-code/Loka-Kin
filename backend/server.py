@@ -340,6 +340,13 @@ class AuthActivateRequest(BaseModel):
     pin_confirmation: str
 
 
+class SelfChangePinRequest(BaseModel):
+    nip: str
+    current_pin: str
+    new_pin: str
+    pin_confirmation: str
+
+
 class BootstrapAdminRequest(BaseModel):
     setup_secret: str
     nip: str
@@ -1071,6 +1078,59 @@ async def activate_account(payload: AuthActivateRequest):
         },
     )
     return {"ok": True, "message": "PIN berhasil dibuat. Silakan masuk menggunakan NIP/NIK dan PIN baru."}
+
+
+WEAK_PINS = {"123456", "111111", "222222", "333333", "444444", "555555",
+             "666666", "777777", "888888", "999999", "000000", "654321", "012345"}
+
+
+@api.post("/auth/self-change-pin")
+async def self_change_pin(payload: SelfChangePinRequest):
+    """Ganti PIN dari halaman masuk: NIP/NIK + PIN lama + PIN baru.
+
+    PIN lama wajib dibuktikan dan percobaan gagal dihitung seperti login, sehingga
+    tidak bisa dipakai untuk menebak PIN. Setelah berhasil, seluruh sesi akun dicabut.
+    """
+    nip = normalize_identity(payload.nip)
+    if not valid_identity(nip):
+        raise HTTPException(400, "Masukkan NIP/NIK yang valid.")
+    if not valid_pin(payload.current_pin):
+        raise HTTPException(401, "NIP/NIK atau PIN lama tidak cocok.")
+    if not valid_pin(payload.new_pin):
+        raise HTTPException(400, "PIN baru harus terdiri dari tepat 6 angka.")
+    if payload.new_pin != payload.pin_confirmation:
+        raise HTTPException(400, "Konfirmasi PIN baru tidak sama.")
+    if payload.new_pin in WEAK_PINS:
+        raise HTTPException(400, "Pilih PIN enam digit yang tidak mudah ditebak.")
+    if payload.new_pin == payload.current_pin:
+        raise HTTPException(400, "PIN baru harus berbeda dari PIN lama.")
+
+    staff = await db.staff.find_one({"nip": nip}, {"_id": 0})
+    if not staff or not staff.get("active", True) or not staff.get("is_activated") or not staff.get("pin_hash"):
+        raise HTTPException(401, "NIP/NIK atau PIN lama tidak cocok.")
+
+    locked_until = parse_datetime(staff.get("login_locked_until", ""))
+    if locked_until and locked_until > utc_now():
+        raise HTTPException(429, "Akun dikunci sementara setelah beberapa percobaan. Coba lagi nanti atau hubungi Admin.")
+    if not verify_credential(payload.current_pin, staff.get("pin_hash", "")):
+        attempts = int(staff.get("login_failed_attempts", 0)) + 1
+        changes: Dict[str, Any] = {"login_failed_attempts": attempts}
+        if attempts >= AUTH_MAX_ATTEMPTS:
+            changes["login_locked_until"] = iso_utc(utc_now() + timedelta(minutes=AUTH_LOCK_MINUTES))
+            changes["login_failed_attempts"] = 0
+        await db.staff.update_one({"id": staff["id"]}, {"$set": changes})
+        raise HTTPException(401, "NIP/NIK atau PIN lama tidak cocok.")
+
+    await db.staff.update_one({"id": staff["id"]}, {"$set": {
+        "pin_hash": hash_credential(payload.new_pin),
+        "pin_change_required": False,
+        "pin_last_changed_at": iso_utc(utc_now()),
+        "pin_source": "self-service",
+        "login_failed_attempts": 0,
+        "login_locked_until": "",
+    }})
+    await db.auth_sessions.delete_many({"staff_id": staff["id"]})
+    return {"ok": True, "message": "PIN berhasil diganti. Silakan masuk dengan PIN baru."}
 
 
 @api.post("/auth/change-pin")

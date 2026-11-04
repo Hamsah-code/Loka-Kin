@@ -11,6 +11,7 @@ Yang dilakukan:
   * mengatur PIN seragam (default 123456) dan mengaktifkan akun roster;
   * memastikan akun Super Admin terpisah ada (NIP 0000000000000001);
   * akun lama yang tidak ada di berkas diarsipkan (nonaktif, ID ``arsip-*``);
+  * PIN yang diganti sendiri oleh pegawai (pin_source = self-service) dipertahankan;
   * tugas (tasks) dan data lain dibiarkan apa adanya; sesi login dicabut.
 
 Jalankan manual:  python scripts/setup_preview_roster.py [--data-file PATH] [--pin 123456]
@@ -137,7 +138,10 @@ def build_snapshot(data: dict, entries, meta, pin: str) -> dict:
         else:
             record["nip"] = ""
             record["id_type"] = ""
-        record.update(pin_fields(pin))
+        # PIN yang sudah diganti sendiri oleh pegawai tetap dipertahankan saat
+        # roster dibangun ulang; akun lain memakai PIN seragam.
+        if record.get("pin_source") != "self-service" or not record.get("pin_hash"):
+            record.update(pin_fields(pin))
 
     # ID harus unik; akun roster sudah memakai ID dari berkas.
     ids = Counter(str(r.get("id")) for r in keep)
@@ -169,7 +173,8 @@ def build_snapshot(data: dict, entries, meta, pin: str) -> dict:
         "identity_is_placeholder": True,
         "credential_source": "clustering-setup",
     })
-    sa.update(pin_fields(meta.get("super_admin", {}).get("pin") or pin))
+    if sa.get("pin_source") != "self-service" or not sa.get("pin_hash"):
+        sa.update(pin_fields(meta.get("super_admin", {}).get("pin") or pin))
 
     data["staff"] = keep
     data["auth_sessions"] = []
