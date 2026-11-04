@@ -2528,7 +2528,7 @@ export default function App() {
         </table>
       `;
     } else {
-      title = `Laporan Kinerja per Staf Penanggung Jawab (${periodTitle[period]})`;
+      title = `Laporan Kinerja per Nama Staf (${periodTitle[period]})`;
       const activeStaff = staff.filter((s) => dateScoped.some((t) => t.staff_id === s.id));
       const displayStaffList = activeStaff.length > 0 ? activeStaff : staff.slice(0, 5);
 
@@ -2568,7 +2568,7 @@ export default function App() {
           <div class="staff-section">
             <div class="staff-banner">
               <div>
-                <strong>${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
+                <strong><span style="color:#475569;font-weight:normal;">Nama Staf:</span> ${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
                 <div style="font-weight:normal;font-size:10px;color:#475569;margin-top:2px;">
                   ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;·&nbsp; Ketua Tim ${signatureGroupOf(s).label}: ${teamLeadText(staff, s)}
                 </div>
@@ -2602,7 +2602,7 @@ export default function App() {
       }).join("");
 
       contentHtml = `
-        <p style="font-size:11px;margin:0 0 16px;color:#334155;">Periode: ${label} · Total <b>${dateScoped.length}</b> laporan kinerja dikelompokkan berdasarkan staf penanggung jawab.</p>
+        <p style="font-size:11px;margin:0 0 16px;color:#334155;">Periode: ${label} · Total <b>${dateScoped.length}</b> laporan kinerja dikelompokkan berdasarkan nama staf.</p>
         ${staffSections}
       `;
 
