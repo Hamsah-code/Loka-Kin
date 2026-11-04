@@ -1704,7 +1704,8 @@ async def get_staff(include_inactive: bool = True, user: Dict[str, Any] = Depend
         query = {"active": True}
     rows = await db.staff.find(query, {"_id": 0}).to_list(500)
     rows.sort(key=staff_sort_key)
-    reveal_identity = user.get("role") in ADMIN_ROLES
+    # NIP/NIK ditampilkan untuk seluruh peran yang sudah masuk (dibutuhkan pada PDF laporan).
+    reveal_identity = True
     return [
         public_staff(
             row,

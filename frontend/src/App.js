@@ -2611,7 +2611,7 @@ export default function App() {
       const leadCell = (g) => `<td><b>Ketua Tim ${g.label}</b></td>`;
       const leadNames = clusterGroups.map((g) => {
         const lead = teamLeadForGroup(staff, g);
-        return `<td><b>${lead?.name || "-"}</b>${lead?.nip ? `<div style="font-size:10px;font-weight:normal;">${staffIdLabel(lead)}: ${lead.nip}</div>` : ""}</td>`;
+        return `<td><b>${lead?.name || "-"}</b></td>`;
       }).join("");
       const leadTable = clusterGroups.length > 0 ? `
         <table class="signature-table">
