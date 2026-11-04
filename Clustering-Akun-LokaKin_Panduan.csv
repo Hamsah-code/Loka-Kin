@@ -1,0 +1,20 @@
+PANDUAN PENGGUNAAN;
+;
+1. Isi peran;"Buka sheet 'Isi Peran'. Isi angka 1 pada tepat satu kolom peran (Super Admin / Kepala Loka / Clinical Supervisor / Ketua Tim / Staf). Kolom sudah terisi otomatis; saat memindahkan peran, hapus dulu angka 1 lama (pilih sel, tekan Delete) agar tidak ada dua peran pada satu baris — baris dengan dua peran ditandai merah."
+2. Lengkapi NIP/NIK;Login memakai NIP/NIK 16 atau 18 digit. Baris dengan NIP/NIK kosong berstatus 'Belum aktivasi' dan tidak dapat dipakai clustering sampai kolom D diisi.
+3. Departemen diawasi;Wajib untuk Kepala Loka, Clinical Supervisor, dan Ketua Tim. Pisahkan beberapa departemen dengan titik koma. Bila kosong, sistem memakai departemen akun itu sendiri.
+4. Super Admin;Isi blok di bawah tabel untuk akun Super Admin terpisah (bukan bagian 78 akun). Kosongkan NIP/NIK bila belum ingin membuatnya.
+5. Terapkan;Hentikan server, jalankan `python scripts/clustering.py apply Clustering-Akun-LokaKin.xlsx`, lalu nyalakan server kembali. Perintah ini juga menyeragamkan PIN.
+6. Periksa;Jalankan `python scripts/clustering.py report` untuk melihat matriks cluster dan daftar akun yang belum lengkap.
+Keamanan;PIN seragam 123456 hanya untuk keperluan clustering/pelatihan. Setelah selesai, rotasi PIN lewat menu Pengaturan website ? Kredensial pegawai atau minta setiap pengguna mengganti PIN.
+;
+KODE PERAN & HAK AKSES;
+Label pada Excel;Kode database / hak akses
+Super Admin;super_admin — Mengelola seluruh aplikasi: roster, peran, laporan, dan pengaturan website.
+Kepala Loka;"head — Membaca seluruh laporan; membuat/mengubah laporan pada departemen yang diawasi."
+Clinical Supervisor;"clinical_supervisor — Membaca seluruh laporan; membuat/mengubah laporan pada departemen yang diawasi."
+Ketua Tim;"team_lead — Membaca laporan yang diawasi; membuat/mengubah laporan pada departemen yang diawasi."
+Staf;staff — Hanya membaca dan mengelola laporan miliknya sendiri.
+;
+DEPARTEMEN RESMI;
+;"Admin; Bendahara; Perencanaan; Informasi dan Humas; Layanan Rehabilitasi Medis; Layanan Rehabilitasi Sosial; Umum; Sarana & Prasarana; Clinical Supervisor"
