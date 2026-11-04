@@ -80,14 +80,15 @@ const signatureGroupOf = (person) => {
   return SIGNATURE_GROUPS.find((group) => group.departments.includes(department)) || SIGNATURE_GROUPS[2];
 };
 
-const teamLeadFor = (staffList, person) => {
-  const group = signatureGroupOf(person);
+const teamLeadForGroup = (staffList, group) => {
   const leads = (staffList || []).filter((s) => s.role === "team_lead");
   const bySupervision = leads.find((lead) =>
     (lead.supervised_departments || []).some((dept) => group.departments.includes(dept)));
   if (bySupervision) return bySupervision;
   return leads.find((lead) => group.departments.includes(lead.department)) || null;
 };
+
+const teamLeadFor = (staffList, person) => teamLeadForGroup(staffList, signatureGroupOf(person));
 
 const headStaffOf = (staffList) => (staffList || []).find((s) => s.role === "head") || null;
 
@@ -102,13 +103,18 @@ const knowingSignature = (staffList, person) => {
     return {
       title: `Ketua Tim ${group.label}`,
       name: lead?.name || `Ketua Tim ${group.label}`,
+      nip: lead?.nip || "",
+      idLabel: staffIdLabel(lead),
       groupLabel: group.label,
       isTeamLead: true,
     };
   }
+  const head = headStaffOf(staffList);
   return {
     title: "Kepala Loka Rehabilitasi Narkotika Kalianda",
-    name: headStaffOf(staffList)?.name || DEFAULT_HEAD_NAME,
+    name: head?.name || DEFAULT_HEAD_NAME,
+    nip: head?.nip || "",
+    idLabel: staffIdLabel(head),
     isTeamLead: false,
   };
 };
@@ -119,11 +125,21 @@ const groupedSignature = (staffList, people) => {
   const groups = [...new Set(list.map((person) => signatureGroupOf(person).id))];
   const allStaff = list.length > 0 && list.every((person) => person.role === "staff");
   if (allStaff && groups.length === 1) return knowingSignature(staffList, list[0]);
+  const head = headStaffOf(staffList);
   return {
     title: "Kepala Loka Rehabilitasi Narkotika Kalianda",
-    name: headStaffOf(staffList)?.name || DEFAULT_HEAD_NAME,
+    name: head?.name || DEFAULT_HEAD_NAME,
+    nip: head?.nip || "",
+    idLabel: staffIdLabel(head),
     isTeamLead: false,
   };
+};
+
+/** Teks Ketua Tim cluster seseorang untuk blok staf PDF: nama + NIP/NIK. */
+const teamLeadText = (staffList, person) => {
+  const lead = teamLeadForGroup(staffList, signatureGroupOf(person));
+  if (!lead) return "-";
+  return `${lead.name}${lead.nip ? ` · ${staffIdLabel(lead)} ${lead.nip}` : ""}`;
 };
 
 const toDateTimeInput = (d = new Date()) => {
@@ -2456,7 +2472,7 @@ export default function App() {
         <div class="staff-header-card">
           <table style="width:100%;font-size:11px;border-collapse:collapse;">
             <tr>
-              <td style="width:160px;font-weight:bold;color:#475569;">Staf Penanggung Jawab</td>
+              <td style="width:160px;font-weight:bold;color:#475569;">Nama Staf</td>
               <td style="font-size:13px;font-weight:bold;color:#0f172a;">: ${targetStaff.name}</td>
               <td style="width:120px;font-weight:bold;color:#475569;">Periode Laporan</td>
               <td style="font-weight:bold;color:#0f172a;">: ${periodTitle[period]} (${label})</td>
@@ -2472,6 +2488,12 @@ export default function App() {
               <td style="color:#1e293b;">: ${targetStaff.department}</td>
               <td style="font-weight:bold;color:#475569;">Keterangan</td>
               <td style="color:#1e293b;">: ${staffKeterangan(targetStaff)}</td>
+            </tr>
+            <tr>
+              <td style="font-weight:bold;color:#475569;">Nama Ketua Tim ${signatureGroupOf(targetStaff).label}</td>
+              <td style="color:#1e293b;">: ${teamLeadText(staff, targetStaff)}</td>
+              <td style="font-weight:bold;color:#475569;"></td>
+              <td></td>
             </tr>
           </table>
         </div>
@@ -2502,7 +2524,7 @@ export default function App() {
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
           <tr><td><b>${pdfSigner.title}</b></td><td><b>Penanggung Jawab / Yang Melaporkan</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>${pdfSigner.name}</b></td><td><b>${targetStaff.name}</b></td></tr>
+          <tr><td><b>${pdfSigner.name}</b>${pdfSigner.nip ? `<div style="font-size:10px;font-weight:normal;">${pdfSigner.idLabel}: ${pdfSigner.nip}</div>` : ""}</td><td><b>${targetStaff.name}</b><div style="font-size:10px;font-weight:normal;">${staffIdLabel(targetStaff)}: ${staffIdValue(targetStaff)}</div></td></tr>
         </table>
       `;
     } else {
@@ -2548,7 +2570,7 @@ export default function App() {
               <div>
                 <strong>${s.name}</strong> · <span style="font-weight:normal;color:#475569;">${s.department}</span>
                 <div style="font-weight:normal;font-size:10px;color:#475569;margin-top:2px;">
-                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)}${s.role === "staff" ? ` &nbsp;·&nbsp; Mengetahui: Ketua Tim ${signatureGroupOf(s).label} (${teamLeadFor(staff, s)?.name || "-"})` : ""}
+                  ${staffIdLabel(s)}: ${staffIdValue(s)} &nbsp;·&nbsp; Keterangan: ${staffKeterangan(s)} &nbsp;·&nbsp; Ketua Tim ${signatureGroupOf(s).label}: ${teamLeadText(staff, s)}
                 </div>
               </div>
               <div style="font-size:10px;font-weight:600;color:#1e3d75;">
@@ -2585,12 +2607,27 @@ export default function App() {
       `;
 
       const pdfSigner = groupedSignature(staff, displayStaffList);
+      const clusterGroups = SIGNATURE_GROUPS.filter((g) => displayStaffList.some((p) => signatureGroupOf(p).id === g.id));
+      const leadCell = (g) => `<td><b>Ketua Tim ${g.label}</b></td>`;
+      const leadNames = clusterGroups.map((g) => {
+        const lead = teamLeadForGroup(staff, g);
+        return `<td><b>${lead?.name || "-"}</b>${lead?.nip ? `<div style="font-size:10px;font-weight:normal;">${staffIdLabel(lead)}: ${lead.nip}</div>` : ""}</td>`;
+      }).join("");
+      const leadTable = clusterGroups.length > 0 ? `
+        <table class="signature-table">
+          <tr>${clusterGroups.map(leadCell).join("")}</tr>
+          <tr class="signature-space">${clusterGroups.map(() => "<td></td>").join("")}</tr>
+          <tr>${leadNames}</tr>
+        </table>` : "";
       sigHtml = `
         <table class="signature-table">
           <tr><td><b>Mengetahui</b></td><td><b>Kalianda, ${currentDate()}</b></td></tr>
+        </table>
+        ${leadTable}
+        <table class="signature-table">
           <tr><td><b>${pdfSigner.title}</b></td><td><b>Penanggung Jawab Admin &amp; SDM</b></td></tr>
           <tr class="signature-space"><td></td><td></td></tr>
-          <tr><td><b>${pdfSigner.name}</b></td><td><b>Daniel, Amd.Kep</b></td></tr>
+          <tr><td><b>${pdfSigner.name}</b>${pdfSigner.nip ? `<div style="font-size:10px;font-weight:normal;">${pdfSigner.idLabel}: ${pdfSigner.nip}</div>` : ""}</td><td><b>Daniel, Amd.Kep</b></td></tr>
         </table>
       `;
     }
