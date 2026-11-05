@@ -554,3 +554,67 @@ def test_small_roster_with_no_reports_does_not_crash(api_client):
     assert replacement.status_code == 200, replacement.text
     assert api_client.get("/api/tasks").json() == []
     assert api_client.get("/api/analytics").status_code == 200
+
+
+
+def _create_active_staff(client, name, nip, department, role="staff", supervised=None):
+    created = client.post("/api/staff", json={
+        "name": name,
+        "department": department,
+        "nip": nip,
+        "role": role,
+        "supervised_departments": supervised or [],
+    })
+    assert created.status_code == 200, created.text
+    staff_id = created.json()["id"]
+    code = client.post(f"/api/auth/staff/{staff_id}/activation-code")
+    assert code.status_code == 200, code.text
+    activated = client.post("/api/auth/activate", json={
+        "nip": nip,
+        "activation_code": code.json()["activation_code"],
+        "pin": TEST_PIN,
+        "pin_confirmation": TEST_PIN,
+    })
+    assert activated.status_code == 200, activated.text
+    return staff_id
+
+
+def test_staff_separation_requires_reassignment_by_unit_team_lead(admin_client):
+    lead_nip, staff_a_nip, staff_b_nip, other_nip = "1600000000000011", "1600000000000012", "1600000000000013", "1600000000000014"
+    lead = _create_active_staff(admin_client, "Ketua Unit", lead_nip, "Umum", role="team_lead", supervised=["Umum"])
+    staff_a = _create_active_staff(admin_client, "Staf Pindah", staff_a_nip, "Umum")
+    staff_b = _create_active_staff(admin_client, "Staf Penerima", staff_b_nip, "Umum")
+    staff_other = _create_active_staff(admin_client, "Staf Lain Unit", other_nip, "Bendahara")
+    assert lead and staff_other
+
+    task = admin_client.post("/api/tasks", json={"title": "Laporan Serah Terima", "staff_id": staff_a, "status": "todo", "target": "1 berkas"})
+    assert task.status_code == 200, task.text
+    task_id = task.json()["id"]
+
+    # Staf masih memegang laporan To Do: penonaktifan harus ditolak.
+    blocked = admin_client.put(f"/api/staff/{staff_a}", json={"active": False})
+    assert blocked.status_code == 400
+    assert "To Do/Doing" in blocked.json()["detail"]
+
+    # Ketua Tim unit Umum memindahkan laporan ke staf Umum: diizinkan.
+    _login(admin_client, lead_nip)
+    moved = admin_client.patch(f"/api/tasks/{task_id}", json={"title": "Laporan Serah Terima", "staff_id": staff_b, "status": "todo", "target": "1 berkas"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["staff_id"] == staff_b
+
+    # Pemindahan ke unit lain ditolak.
+    refused = admin_client.patch(f"/api/tasks/{task_id}", json={"title": "Laporan Serah Terima", "staff_id": staff_other, "status": "todo", "target": "1 berkas"})
+    assert refused.status_code == 403
+
+    # Admin menonaktifkan staf yang sudah tidak punya laporan terbuka.
+    _login(admin_client, ADMIN_NIP)
+    deactivated = admin_client.put(f"/api/staff/{staff_a}", json={"active": False, "separation_date": "2026-11-05"})
+    assert deactivated.status_code == 200, deactivated.text
+    assert deactivated.json()["active"] is False
+    assert deactivated.json()["separation_date"] == "2026-11-05"
+    assert api_login_fails(admin_client, staff_a_nip, TEST_PIN)
+
+    # Aktifkan kembali: tanggal berhenti dikosongkan.
+    back = admin_client.put(f"/api/staff/{staff_a}", json={"active": True})
+    assert back.status_code == 200, back.text
+    assert back.json()["separation_date"] == ""

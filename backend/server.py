@@ -285,6 +285,7 @@ class Staff(BaseModel):
     role: str = "staff"
     supervised_departments: List[str] = Field(default_factory=list)
     is_activated: bool = False
+    separation_date: str = ""
 
 
 class StaffCreate(BaseModel):
@@ -310,6 +311,7 @@ class StaffUpdate(BaseModel):
     active: Optional[bool] = None
     role: Optional[str] = None
     supervised_departments: Optional[List[str]] = None
+    separation_date: Optional[str] = None
 
 
 class StaffImportRow(BaseModel):
@@ -456,7 +458,7 @@ def public_staff(
         for key, default in {
             "id": "", "name": "", "department": "", "initials": "",
             "active": True, "keterangan": "", "position": "",
-            "role": "staff", "supervised_departments": [],
+            "role": "staff", "supervised_departments": [], "separation_date": "",
         }.items()
     }
     if reveal_account_status:
@@ -572,6 +574,33 @@ def can_manage_staff_record(user: Dict[str, Any], staff_record: Dict[str, Any]) 
 
 def is_report_manager(user: Dict[str, Any]) -> bool:
     return user.get("role") in READ_ALL_ROLES
+
+
+OPEN_TASK_STATUSES = ["todo", "doing", "plan"]
+
+
+async def count_open_tasks(staff_id: str) -> int:
+    """Laporan To Do/Doing yang masih dipegang staf; harus dialihkan sebelum staf dinonaktifkan."""
+    return await db.tasks.count_documents({"staff_id": staff_id, "status": {"$in": OPEN_TASK_STATUSES}})
+
+
+def open_tasks_block_message(count: int) -> str:
+    return (
+        f"Masih ada {count} laporan To Do/Doing atas nama staf ini. "
+        "Alihkan laporan tersebut ke staf lain oleh Ketua Tim unit sebelum menonaktifkan staf."
+    )
+
+
+def today_jakarta_iso() -> str:
+    return datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d")
+
+
+def valid_iso_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 
 def normalize_task_status(value: Any) -> Optional[str]:
@@ -2094,9 +2123,20 @@ async def update_staff(staff_id: str, payload: StaffUpdate, user: Dict[str, Any]
         if changes.get("role", existing.get("role", "staff")) not in SUPERVISOR_ROLES:
             supervised = []
         changes["supervised_departments"] = supervised
+    if "separation_date" in changes and not valid_iso_date(changes["separation_date"]):
+        raise HTTPException(400, "Tanggal berhenti tidak valid (format YYYY-MM-DD).")
     if changes.get("active") is False:
+        if existing.get("active", True):
+            open_count = await count_open_tasks(staff_id)
+            if open_count:
+                raise HTTPException(400, open_tasks_block_message(open_count))
+        changes["separation_date"] = changes.get("separation_date") or today_jakarta_iso()
         changes["is_activated"] = False
         await db.auth_sessions.delete_many({"staff_id": staff_id})
+    elif changes.get("active") is True:
+        changes["separation_date"] = ""
+    elif "separation_date" in changes and existing.get("active", True) is not False:
+        changes.pop("separation_date")
 
     if changes:
         await db.staff.update_one({"id": staff_id}, {"$set": changes})
@@ -2116,11 +2156,14 @@ async def delete_staff(staff_id: str, user: Dict[str, Any] = Depends(require_adm
         raise HTTPException(400, "Admin aktif terakhir tidak dapat dihapus atau dinonaktifkan.")
     if staff.get("role") == "super_admin" and staff.get("active", True) and staff.get("is_activated") and await db.staff.count_documents({"role": "super_admin", "active": {"$ne": False}, "is_activated": True}) <= 1:
         raise HTTPException(400, "Super Admin aktif terakhir tidak dapat dihapus atau dinonaktifkan.")
-    await db.auth_sessions.delete_many({"staff_id": staff_id})
     if await db.tasks.count_documents({"staff_id": staff_id}) > 0:
+        open_count = await count_open_tasks(staff_id)
+        if open_count:
+            raise HTTPException(400, open_tasks_block_message(open_count))
+        await db.auth_sessions.delete_many({"staff_id": staff_id})
         await db.staff.update_one(
             {"id": staff_id},
-            {"$set": {"active": False, "is_activated": False, "archived": True, "archive_reason": "Dinonaktifkan oleh Admin"}},
+            {"$set": {"active": False, "is_activated": False, "archived": True, "archive_reason": "Dinonaktifkan oleh Admin", "separation_date": today_jakarta_iso()}},
         )
         return {"ok": True, "deactivated": True}
     result = await db.staff.delete_one({"id": staff_id})
@@ -2199,10 +2242,18 @@ async def update_task(task_id: str, payload: TaskCreate, user: Dict[str, Any] = 
         raise HTTPException(403, "Laporan Finish terkunci. Hubungi Admin untuk koreksi.")
 
     doc = payload.model_dump()
-    # Hanya Admin yang boleh memindahkan laporan ke staf lain. Pengguna lain
-    # tetap terikat pada pemilik laporan yang sudah tersimpan di server.
+    # Admin dapat memindahkan laporan ke staf aktif mana pun. Ketua Tim hanya dapat
+    # memindahkan laporan ke staf aktif di unit (departemen) yang ia awasi.
+    # Pengguna lain tetap terikat pada pemilik laporan yang tersimpan di server.
     if user.get("role") not in ADMIN_ROLES:
-        doc["staff_id"] = existing["staff_id"]
+        requested_owner = doc.get("staff_id") or existing["staff_id"]
+        if requested_owner != existing["staff_id"]:
+            if user.get("role") != "team_lead":
+                raise HTTPException(403, "Hanya Admin atau Ketua Tim yang dapat memindahkan laporan ke staf lain.")
+            target_staff = await db.staff.find_one({"id": requested_owner}, {"_id": 0})
+            if not target_staff or not can_manage_staff_record(user, target_staff):
+                raise HTTPException(403, "Laporan hanya dapat dipindahkan ke staf aktif dalam unit Anda.")
+        doc["staff_id"] = requested_owner
     else:
         target_staff = await db.staff.find_one({"id": doc.get("staff_id")}, {"_id": 0})
         if not target_staff:

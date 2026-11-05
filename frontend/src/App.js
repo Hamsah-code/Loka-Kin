@@ -999,6 +999,7 @@ function StaffModal({ staff, onClose, onSave, canAssignSuperAdmin = false }) {
     keterangan: staff?.keterangan || "",
     position: staff?.position || "",
     active: staff?.active ?? true,
+    separation_date: staff?.separation_date || "",
     role: staff?.role || "staff",
     supervised_departments: staff?.supervised_departments || [],
   });
@@ -1059,6 +1060,13 @@ function StaffModal({ staff, onClose, onSave, canAssignSuperAdmin = false }) {
             <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
             <span>Akun aktif dan dapat masuk menggunakan PIN</span>
           </label>
+          {isEdit && form.active === false && (
+            <label className="full" data-testid="staff-separation-date-field">
+              Tanggal berhenti (mantan staf)
+              <input type="date" data-testid="staff-separation-date-input" value={form.separation_date} onChange={(e) => setForm({ ...form, separation_date: e.target.value })} />
+              <small style={{ color: "#64748b" }}>Pastikan Ketua Tim unit sudah mengalihkan semua laporan To Do dan Doing ke staf lain. Jika belum, sistem menolak penonaktifan.</small>
+            </label>
+          )}
         </div>
         <div className="modal-actions">
           <button className="secondary-btn" data-testid="staff-cancel-button" onClick={onClose}>Batal</button>
@@ -1628,7 +1636,7 @@ function StaffPage({ staff, tasks, onAdd, onEdit, onDelete, onImport, onIssueCod
             <b>{tasks.filter((t) => t.staff_id === s.id).length} laporan</b>
             <div className="staff-status-cell">
               {s.active === false
-                ? <span className="inactive-pill" title={s.archive_reason || "Tidak ada pada daftar staf terbaru"}><i /> Nonaktif</span>
+                ? <span className="inactive-pill" title={s.separation_date ? `Berhenti: ${s.separation_date}` : (s.archive_reason || "Tidak ada pada daftar staf terbaru")}><i /> {s.separation_date ? "Mantan staf" : "Nonaktif"}</span>
                 : <span className="active-pill"><i /> Aktif</span>}
               <small className={s.is_activated ? "pin-active" : "pin-pending"}>{s.is_activated ? "PIN aktif" : "Belum aktivasi"}</small>
             </div>
@@ -2149,6 +2157,9 @@ export default function App() {
       role: form.role || "staff",
       supervised_departments: form.supervised_departments || [],
     };
+    if (isEdit) {
+      payload.separation_date = form.active === false ? (form.separation_date || null) : null;
+    }
     try {
       if (isEdit) {
         const res = await axios.put(`${API}/staff/${form.id}`, payload);
@@ -2855,7 +2866,7 @@ export default function App() {
       {importOpen && <StaffImportModal onClose={() => setImportOpen(false)} onConfirm={importStaff} onResetRoster={resetRoster} />}
       {modal?.staffModal
         ? <StaffModal staff={modal.staff} onClose={() => setModal(null)} onSave={saveStaff} canAssignSuperAdmin={isSuperAdmin} />
-        : modal && <TaskModal task={modal.id ? modal : null} staff={taskModalStaff} allowStaffSelection={isAdmin} onClose={() => setModal(null)} onSave={save} />}
+        : modal && <TaskModal task={modal.id ? modal : null} staff={taskModalStaff} allowStaffSelection={isAdmin || authUser?.role === "team_lead"} onClose={() => setModal(null)} onSave={save} />}
       {transitionModal && (
         <StatusTransitionModal
           transitionData={transitionModal}
