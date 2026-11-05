@@ -34,7 +34,7 @@ db, client, DB_MODE = create_database(mongo_url, os.environ.get("DB_NAME", "loka
 app = FastAPI(title="LOKA-Kin API")
 api = APIRouter(prefix="/api")
 
-DEPARTMENTS = ["Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum", "Sarana & Prasarana", "Clinical Supervisor"]
+DEPARTMENTS = ["Kepala Loka", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum", "Sarana & Prasarana", "Clinical Supervisor"]
 
 ROLE_LABELS = {
     "staff": "Staf",
@@ -120,6 +120,8 @@ DEPT_MAP = {
     "Layanan Rehabilitasi Sosial": "Layanan Rehabilitasi Sosial",
     "Layanan Rehabilitasi Medis": "Layanan Rehabilitasi Medis",
     "Admin": "Admin",
+    "Kepala Loka": "Kepala Loka",
+    "Kepala": "Kepala Loka",
 }
 
 # Sumber: DAFTAR HADIR STAF.docx (78 staf resmi)
@@ -2350,7 +2352,7 @@ ANALYTICS_SECTIONS = [
         "title": "Bagian Umum",
         "short": "Umum",
         "tagline": "Tata usaha, keuangan, SDM, perencanaan, humas & sarana prasarana",
-        "departments": ["Umum", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
+        "departments": ["Umum", "Admin", "Kepala Loka", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
         "icon": "Building2",
         "color": "blue",
         "code_prefix": "UM",

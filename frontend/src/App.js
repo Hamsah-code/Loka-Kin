@@ -33,7 +33,7 @@ const columns = [
   { key: "finish", label: "Finish", color: "green", hint: "Sudah diselesaikan" },
 ];
 const departments = [
-  "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas",
+  "Kepala Loka", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas",
   "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum",
   "Sarana & Prasarana", "Clinical Supervisor",
 ];
@@ -71,7 +71,7 @@ const SIGNATURE_GROUPS = [
   {
     id: "umum",
     label: "Umum",
-    departments: ["Umum", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
+    departments: ["Umum", "Admin", "Kepala Loka", "Bendahara", "Perencanaan", "Informasi dan Humas", "Sarana & Prasarana"],
   },
 ];
 const DEFAULT_HEAD_NAME = "Heru Herlambang, S.AP";

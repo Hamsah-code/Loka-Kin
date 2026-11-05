@@ -41,7 +41,7 @@ ROLE_ACCESS = {
 }
 
 DEPARTMENTS = [
-    "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas",
+    "Kepala Loka", "Admin", "Bendahara", "Perencanaan", "Informasi dan Humas",
     "Layanan Rehabilitasi Medis", "Layanan Rehabilitasi Sosial", "Umum",
     "Sarana & Prasarana", "Clinical Supervisor",
 ]

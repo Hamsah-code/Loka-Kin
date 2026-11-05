@@ -45,6 +45,8 @@ ROLE_ALIASES = {
 
 # Alias departemen/bagian pada berkas -> departemen resmi aplikasi.
 DEPARTMENT_ALIASES = {
+    "kepala loka": "Kepala Loka",
+    "kepala": "Kepala Loka",
     "layanan umum": "Umum",
     "umum": "Umum",
     "tata usaha": "Umum",
@@ -73,7 +75,7 @@ DEPARTMENT_ALIASES = {
 SUPERVISOR_ROLE_CODES = {"head", "clinical_supervisor", "team_lead"}
 
 # Departemen bawaan untuk akun Kepala Loka (bukan bagian layanan).
-DEFAULT_HEAD_DEPARTMENT = "Admin"
+DEFAULT_HEAD_DEPARTMENT = "Kepala Loka"
 
 
 class TemplateError(ValueError):
